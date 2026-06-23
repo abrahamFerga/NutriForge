@@ -15,6 +15,7 @@ public static class DependencyInjection
         var options = builder.Configuration.GetSection(AiOptions.SectionName).Get<AiOptions>() ?? new AiOptions();
         builder.Services.AddSingleton(options);
         builder.Services.AddSingleton<IAssistantAgentFactory, AssistantAgentFactory>();
+        builder.Services.AddScoped<LogProposalHolder>();
         builder.Services.AddScoped<AssistantTools>();
         builder.Services.AddScoped<NutritionAssistantService>();
 

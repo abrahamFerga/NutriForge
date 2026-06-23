@@ -5,6 +5,7 @@ import type {
   DiaryEntry,
   FoodDetail,
   FoodSummary,
+  LogProposal,
   ProfileDto,
   TargetsDto,
   TrendPoint,
@@ -203,7 +204,122 @@ export const assistantApi = {
       body: { message },
     });
   },
+  /**
+   * Streams an assistant reply via Server-Sent Events.
+   * - `onText` is called with each text chunk as it arrives.
+   * - `onProposal` is called at most once if the assistant proposes a diary log.
+   * Resolves when the stream terminates (the `done` event or end of body).
+   * Throws {@link ApiError} with status 503 when the assistant isn't configured.
+   */
+  async chatStream(
+    message: string,
+    onText: (chunk: string) => void,
+    onProposal: (proposal: LogProposal) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const headers = new Headers();
+    headers.set("X-Debug-Subject", "demo-user");
+    headers.set("X-Debug-Role", "user");
+    headers.set("Content-Type", "application/json");
+    headers.set("Accept", "text/event-stream");
+    headers.set("Idempotency-Key", crypto.randomUUID());
+
+    const response = await fetch(buildUrl("/api/v1/assistant/chat/stream"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message }),
+      signal,
+    });
+
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => "");
+      let problem: ProblemDetails = {};
+      if (text) {
+        try {
+          problem = JSON.parse(text) as ProblemDetails;
+        } catch {
+          /* non-JSON body */
+        }
+      }
+      const fallback = `Request failed (${response.status} ${response.statusText})`;
+      throw new ApiError(formatProblem(problem, fallback), response.status, problem);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let sep: number;
+        // SSE frames are separated by a blank line ("\n\n").
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const stop = handleSseFrame(frame, onText, onProposal);
+          if (stop) return;
+        }
+      }
+      // Flush any trailing frame without a closing blank line.
+      if (buffer.trim().length > 0) {
+        handleSseFrame(buffer, onText, onProposal);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  },
   clear(): Promise<void> {
     return request<void>("/api/v1/assistant/session", { method: "DELETE" });
   },
 };
+
+/**
+ * Parses one SSE frame and dispatches it. Returns `true` when the terminating
+ * `done` event is seen, signalling the caller to stop reading.
+ */
+function handleSseFrame(
+  frame: string,
+  onText: (chunk: string) => void,
+  onProposal: (proposal: LogProposal) => void,
+): boolean {
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const rawLine of frame.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (line.startsWith(":") || line === "") continue; // comment / blank
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).replace(/^ /, ""));
+    }
+  }
+
+  const data = dataLines.join("\n");
+
+  if (event === "done") return true;
+  if (event === "proposal") {
+    if (data) {
+      try {
+        onProposal(JSON.parse(data) as LogProposal);
+      } catch {
+        /* ignore malformed proposal */
+      }
+    }
+    return false;
+  }
+  // default (message) event — a text chunk.
+  if (data) {
+    try {
+      const payload = JSON.parse(data) as { text?: string };
+      if (typeof payload.text === "string") onText(payload.text);
+    } catch {
+      /* ignore malformed chunk */
+    }
+  }
+  return false;
+}

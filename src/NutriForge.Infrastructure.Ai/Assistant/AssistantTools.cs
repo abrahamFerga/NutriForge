@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using NutriForge.Application.Abstractions;
 using NutriForge.Application.Food;
 using NutriForge.Application.Tracking;
+using NutriForge.Domain.Common;
 
 namespace NutriForge.Infrastructure.Ai.Assistant;
 
@@ -23,7 +24,8 @@ public sealed class AssistantTools(
     DiaryService diary,
     ProfileService profiles,
     ICurrentUser user,
-    IClock clock)
+    IClock clock,
+    LogProposalHolder proposals)
 {
     private Guid Uid => user.UserId ?? throw new InvalidOperationException("No authenticated user.");
 
@@ -34,6 +36,7 @@ public sealed class AssistantTools(
         AIFunctionFactory.Create(GetDailyTargets),
         AIFunctionFactory.Create(GetTodaySummary),
         AIFunctionFactory.Create(GetProfile),
+        AIFunctionFactory.Create(ProposeLogFood),
     ];
 
     [Description("Search the food catalog by name. Returns matching foods with per-100g calories and macros and an id usable for logging.")]
@@ -78,5 +81,32 @@ public sealed class AssistantTools(
         return p is null
             ? new { message = "No profile set yet." }
             : new { goal = p.Goal.ToString(), activity = p.Activity.ToString(), macroStrategy = p.MacroStrategy.ToString(), p.Allergens, p.PreferredDiets };
+    }
+
+    [Description("Propose logging a food to today's diary for the user to confirm. This does NOT log it — it computes the entry (calories/macros) and returns a proposal; the user must confirm in the UI. Use a foodId and (optionally) a portionId from SearchFoods.")]
+    public async Task<object> ProposeLogFood(
+        [Description("The food id from SearchFoods.")] Guid foodId,
+        [Description("Meal slot: Breakfast, Lunch, Dinner, or Snack.")] string mealSlot,
+        [Description("How many portions (if a portionId is given) or grams (if not).")] double quantity,
+        [Description("Optional portion id from SearchFoods; omit to log by grams.")] Guid? portionId,
+        CancellationToken cancellationToken)
+    {
+        var slot = Enum.TryParse<MealSlot>(mealSlot, ignoreCase: true, out var parsed) ? parsed : MealSlot.Snack;
+        var req = new AddDiaryEntryRequest(clock.Today, slot, foodId, portionId, quantity);
+        var preview = await diary.PreviewAsync(Uid, req, cancellationToken).ConfigureAwait(false);
+
+        proposals.Current = new LogProposal(
+            foodId, preview.FoodName, portionId, preview.PortionName, quantity, preview.Grams,
+            slot.ToString(), clock.Today, preview.Kcal, preview.ProteinG, preview.FatG, preview.CarbG);
+
+        return new
+        {
+            proposed = true,
+            preview.FoodName,
+            grams = preview.Grams,
+            kcal = preview.Kcal,
+            mealSlot = slot.ToString(),
+            note = "Proposal ready — tell the user exactly what will be logged and ask them to confirm.",
+        };
     }
 }

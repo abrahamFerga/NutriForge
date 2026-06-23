@@ -171,3 +171,25 @@ export interface TrendPoint {
   kcal: number;
   targetKcal: number;
 }
+
+// ---- Assistant ----
+
+/**
+ * A diary-log proposal streamed by the assistant that the user must confirm.
+ * The five fields { date, mealSlot, foodId, portionId, quantity } map straight
+ * onto {@link CreateDiaryEntryRequest}.
+ */
+export interface LogProposal {
+  foodId: string;
+  foodName: string;
+  portionId: string | null;
+  portionName: string;
+  quantity: number;
+  grams: number;
+  mealSlot: MealSlot;
+  date: string; // yyyy-MM-dd
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+}

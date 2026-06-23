@@ -1,7 +1,8 @@
 name: CI
 
-# Build, test, and format-check on every push to main and on PRs.
-# No cloud credentials are needed here, so no id-token permission is granted.
+# Build, format-check, and TEST (incl. the Aspire integration tests, which boot real Postgres +
+# Redis containers — ubuntu-latest provides Docker). Plus a container image build + vulnerability
+# scan + SBOM, and a Playwright E2E validation job. No cloud credentials needed here.
 
 on:
   push:
@@ -19,7 +20,7 @@ env:
 
 jobs:
   build-test:
-    name: Build, format, test
+    name: Build, format, test (unit + integration)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,13 +35,13 @@ jobs:
         run: dotnet restore
 
       - name: Verify formatting
-        # Fails the build if any file is not formatted to the repo conventions.
         run: dotnet format --verify-no-changes --no-restore
 
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
-      - name: Test
+      - name: Test (unit + Aspire integration via Docker)
+        # Integration tests start Postgres/Redis containers through Aspire.Hosting.Testing.
         run: >
           dotnet test
           --configuration Release
@@ -48,10 +49,111 @@ jobs:
           --logger "trx;LogFileName=test-results.trx"
           --collect "XPlat Code Coverage"
 
-      - name: Upload test results
+      - name: Coverage report
+        if: always()
+        uses: danielpalme/ReportGenerator-GitHub-Action@5.3.11
+        with:
+          reports: "**/TestResults/**/coverage.cobertura.xml"
+          targetdir: coverage-report
+          reporttypes: "HtmlInline;MarkdownSummaryGithub"
+
+      - name: Publish coverage summary
+        if: always()
+        run: cat coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload test results + coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: "**/TestResults/**/*"
+          path: |
+            **/TestResults/**/*
+            coverage-report/**
           if-no-files-found: ignore
+
+  container-scan:
+    name: Container image build + scan + SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (pinned by global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # The .NET SDK builds an OCI image with no Dockerfile (Microsoft.NET.Build.Containers).
+      - name: Build API container image
+        run: >
+          dotnet publish src/NutriForge.Api/NutriForge.Api.csproj
+          --configuration Release
+          /t:PublishContainer
+          -p:ContainerRepository=nutriforge-api
+          -p:ContainerImageTag=ci
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: nutriforge-api:ci
+          format: sarif
+          output: trivy-results.sarif
+          severity: HIGH,CRITICAL
+          # Report (don't fail the build yet) until a baseline is established.
+          exit-code: "0"
+
+      - name: Upload Trivy results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          image: nutriforge-api:ci
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          if-no-files-found: ignore
+
+  e2e:
+    name: Playwright E2E (validate; live run env-gated)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tests/NutriForge.E2E
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install deps
+        run: npm ci || npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Validates the E2E specs compile/list without a running stack.
+      - name: List E2E tests
+        run: npx playwright test --list
+
+      # A full run needs the stack up; provide E2E_BASE_URL (repo variable) to enable it.
+      - name: Run E2E against a deployed/preview stack
+        if: ${{ vars.E2E_BASE_URL != '' }}
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+        run: npx playwright test

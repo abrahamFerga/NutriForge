@@ -20,6 +20,24 @@ public sealed class DiaryService(IAppDbContext db, ICatalogDbContext catalog, Ta
 {
     public async Task<DiaryEntryDto> AddAsync(Guid userId, AddDiaryEntryRequest req, CancellationToken ct = default)
     {
+        var entry = await BuildEntryAsync(userId, req, ct).ConfigureAwait(false);
+        db.DiaryEntries.Add(entry);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return entry.ToDto();
+    }
+
+    /// <summary>
+    /// Compute what an entry <em>would</em> look like (resolved food, grams, log-time snapshot)
+    /// without saving it — used by the assistant to propose a diary entry for the user to confirm.
+    /// </summary>
+    public async Task<DiaryEntryDto> PreviewAsync(Guid userId, AddDiaryEntryRequest req, CancellationToken ct = default)
+    {
+        var entry = await BuildEntryAsync(userId, req, ct).ConfigureAwait(false);
+        return entry.ToDto();
+    }
+
+    private async Task<DiaryEntry> BuildEntryAsync(Guid userId, AddDiaryEntryRequest req, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(req);
 
         var food = await catalog.Foods.AsNoTracking()
@@ -61,10 +79,7 @@ public sealed class DiaryService(IAppDbContext db, ICatalogDbContext catalog, Ta
             Grams = grams,
         };
         entry.SetSnapshot(food.MacrosFor(grams).Rounded());
-
-        db.DiaryEntries.Add(entry);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return entry.ToDto();
+        return entry;
     }
 
     public async Task<bool> DeleteAsync(Guid userId, Guid entryId, CancellationToken ct = default)

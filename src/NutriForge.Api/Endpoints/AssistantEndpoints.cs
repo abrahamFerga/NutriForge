@@ -1,10 +1,11 @@
+using System.Text.Json;
 using NutriForge.Api.Setup;
 using NutriForge.Application.Authorization;
 using NutriForge.Infrastructure.Ai.Assistant;
 
 namespace NutriForge.Api.Endpoints;
 
-/// <summary>The always-present NutritionAssistant (MAF) — chat, status, and clear-conversation.</summary>
+/// <summary>The always-present NutritionAssistant (MAF) — chat, streaming chat, status, clear.</summary>
 public static class AssistantEndpoints
 {
     public sealed record ChatRequest(string Message);
@@ -22,22 +23,54 @@ public static class AssistantEndpoints
             Results.Ok(new { configured = svc.IsConfigured }))
             .WithName("AssistantStatus");
 
-        // One conversational turn. The agent dispatches read tools that own the numbers.
+        // One conversational turn. Returns the reply and an optional diary-log proposal the user
+        // confirms via the normal diary endpoint (the agent never writes the diary itself).
         group.MapPost("/chat", async (ChatRequest req, NutritionAssistantService svc, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(req.Message) || req.Message.Length > 2000)
+            if (!IsValid(req, out var message))
             {
-                return Results.Problem(
-                    title: "Invalid message",
-                    detail: "Message must be between 1 and 2000 characters.",
-                    statusCode: StatusCodes.Status400BadRequest);
+                return InvalidMessage();
             }
 
-            var reply = await svc.ChatAsync(req.Message.Trim(), ct);
-            return Results.Ok(new { reply });
+            var turn = await svc.ChatAsync(message, ct);
+            return Results.Ok(new { reply = turn.Reply, proposal = turn.Proposal });
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("AssistantChat");
+
+        // Streaming variant: server-sent events. `data:` events carry text chunks; a final
+        // `proposal` event (if any) and a `done` event close the stream.
+        group.MapPost("/chat/stream", async (ChatRequest req, NutritionAssistantService svc, HttpContext http, CancellationToken ct) =>
+        {
+            if (!svc.IsConfigured)
+            {
+                return Results.Problem(title: "Assistant unavailable", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (!IsValid(req, out var message))
+            {
+                return InvalidMessage();
+            }
+
+            http.Response.ContentType = "text/event-stream";
+            http.Response.Headers["Cache-Control"] = "no-cache";
+
+            await foreach (var chunk in svc.ChatStreamAsync(message, ct))
+            {
+                await http.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { text = chunk })}\n\n", ct);
+                await http.Response.Body.FlushAsync(ct);
+            }
+
+            if (svc.PendingProposal is { } proposal)
+            {
+                await http.Response.WriteAsync($"event: proposal\ndata: {JsonSerializer.Serialize(proposal)}\n\n", ct);
+            }
+
+            await http.Response.WriteAsync("event: done\ndata: {}\n\n", ct);
+            return Results.Empty;
+        })
+            .RequireRateLimiting(RateLimitPolicies.Expensive)
+            .WithName("AssistantChatStream");
 
         // Clear the persisted conversation.
         group.MapDelete("/session", async (NutritionAssistantService svc, CancellationToken ct) =>
@@ -49,4 +82,15 @@ public static class AssistantEndpoints
 
         return app;
     }
+
+    private static bool IsValid(ChatRequest req, out string message)
+    {
+        message = req.Message?.Trim() ?? string.Empty;
+        return message.Length is > 0 and <= 2000;
+    }
+
+    private static IResult InvalidMessage() => Results.Problem(
+        title: "Invalid message",
+        detail: "Message must be between 1 and 2000 characters.",
+        statusCode: StatusCodes.Status400BadRequest);
 }
