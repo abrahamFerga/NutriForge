@@ -97,17 +97,28 @@ src/
 tests/                           Domain / Application / Aspire integration tests
 ```
 
-### Build & run
+### Build, run & verify
 
 ```bash
-# build + unit tests
+# build everything
 dotnet build NutriForge.slnx
-dotnet test tests/NutriForge.Domain.Tests tests/NutriForge.Application.Tests
 
-# run the whole system (API + Postgres + Redis + SPA) — needs Docker + the Aspire workload
-dotnet run --project src/NutriForge.AppHost
+# run the whole system (API + Postgres + Redis + SPA) — needs Docker running
+./scripts/run-and-wait.ps1          # or: dotnet run --project src/NutriForge.AppHost
+#   → open the Aspire dashboard URL it prints; the SPA + API resources are listed there.
+
+# tests: 12/12 green. Integration tests boot the real AppHost (Postgres + Redis) via Docker.
+dotnet test NutriForge.slnx
 ```
 
-In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required); the SPA sends an
-`X-Debug-Subject` header so you can click straight into the app. Next up off the backlog: Epic 4
-(barcode + natural-language logging), then the differentiators (recipes, diet generation).
+The calorie-tracking slice is **runtime-verified**, not just build-green: the Aspire integration
+tests (`tests/NutriForge.IntegrationTests`) boot the whole AppHost with real containers and drive
+profile → derived target (2345 kcal) → food search → diary log → day rollup → GDPR export, plus
+the auth/RBAC contract (401 anonymous, 403 user-on-admin, 200 admin). The committed
+[`http/`](http/) request catalog and the run script let an agent or a human exercise every
+endpoint by hand.
+
+In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required): send
+`X-Debug-Subject` to act as a user, `X-Debug-Role` to pick `user`/`admin`; **no subject header ⇒
+anonymous**. Next up off the backlog: Epic 4 (barcode + natural-language logging — the first epic
+that needs an LLM key), then the differentiators (recipes, diet generation).
