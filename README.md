@@ -133,5 +133,12 @@ In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required): 
 anonymous**. **Epic 4 (low-friction logging) is built**: barcode lookup with Open Food Facts
 fetch-on-miss (`GET /api/v1/foods/barcode/{gtin}`) and natural-language entry
 (`POST /api/v1/diary/parse` — "2 eggs and toast" → confirmable candidates; the LLM only parses,
-deterministic code owns the numbers; needs `OPENAI_API_KEY`). Next: the differentiators — Epic 5
-(recipes & batch cooking) and Epic 6 (diet generation).
+deterministic code owns the numbers; needs `OPENAI_API_KEY`).
+
+The **differentiators are built**: **Epic 5** — computed-nutrition recipes (`/api/v1/recipes`)
+and the consolidated, aisle-grouped, pantry-aware shopping list (`/api/v1/shopping-lists`); and
+**Epic 6** — the flagship **diet generation** (`/api/v1/diet-plans`): desire/intent → PARSE (LLM,
+optional) → FILTER (deterministic, allergen-safe) → SELECT → VERIFY → **OR-Tools LP REPAIR** →
+EXPLAIN, then the closed loop (accept → shopping list → adherence). The LLM proposes intent/taste/
+explanation; deterministic code owns every number and every allergen gate. Remaining: the
+cross-cutting hardening/growth epics (8–12).

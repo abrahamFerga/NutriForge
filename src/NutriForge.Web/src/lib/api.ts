@@ -1,14 +1,25 @@
 import type {
+  AdherencePoint,
   CreateDiaryEntryRequest,
+  CreateDietPlanRequest,
   CreateFoodRequest,
+  CreatePantryItemRequest,
+  CreateRecipeRequest,
+  CreateShoppingListRequest,
   DiaryDay,
   DiaryEntry,
   DiaryParseResult,
+  DietPlanDto,
   FoodDetail,
   FoodSummary,
   LogProposal,
   MealSlot,
+  PantryItem,
   ProfileDto,
+  RecipeDto,
+  RecipeScaleDto,
+  RecipeSummary,
+  ShoppingListDto,
   TargetsDto,
   TrendPoint,
   UpdateProfileRequest,
@@ -210,6 +221,90 @@ export const diaryApi = {
       method: "POST",
       body: { text, mealSlot, date },
     });
+  },
+};
+
+// ---- Recipes ----
+
+export const recipesApi = {
+  search(q: string, signal?: AbortSignal): Promise<RecipeSummary[]> {
+    const qs = q ? `?q=${encodeURIComponent(q)}` : "";
+    return request<RecipeSummary[]>(`/api/v1/recipes${qs}`, { signal });
+  },
+  get(id: string): Promise<RecipeDto> {
+    return request<RecipeDto>(`/api/v1/recipes/${encodeURIComponent(id)}`);
+  },
+  create(body: CreateRecipeRequest): Promise<RecipeDto> {
+    return request<RecipeDto>("/api/v1/recipes", { method: "POST", body });
+  },
+  scale(id: string, servings: number): Promise<RecipeScaleDto> {
+    return request<RecipeScaleDto>(
+      `/api/v1/recipes/${encodeURIComponent(id)}/scale?servings=${servings}`,
+    );
+  },
+};
+
+// ---- Pantry ----
+
+export const pantryApi = {
+  list(): Promise<PantryItem[]> {
+    return request<PantryItem[]>("/api/v1/pantry");
+  },
+  add(body: CreatePantryItemRequest): Promise<PantryItem> {
+    return request<PantryItem>("/api/v1/pantry", { method: "POST", body });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/pantry/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ---- Shopping lists ----
+
+export const shoppingApi = {
+  create(body: CreateShoppingListRequest): Promise<ShoppingListDto> {
+    return request<ShoppingListDto>("/api/v1/shopping-lists", {
+      method: "POST",
+      body,
+    });
+  },
+  get(id: string): Promise<ShoppingListDto> {
+    return request<ShoppingListDto>(
+      `/api/v1/shopping-lists/${encodeURIComponent(id)}`,
+    );
+  },
+};
+
+// ---- Diet plans ----
+
+export const dietPlansApi = {
+  /** POST returns 202 with the (likely still Generating) plan. */
+  create(body: CreateDietPlanRequest): Promise<DietPlanDto> {
+    return request<DietPlanDto>("/api/v1/diet-plans", { method: "POST", body });
+  },
+  get(id: string, signal?: AbortSignal): Promise<DietPlanDto> {
+    return request<DietPlanDto>(
+      `/api/v1/diet-plans/${encodeURIComponent(id)}`,
+      { signal },
+    );
+  },
+  accept(id: string): Promise<DietPlanDto> {
+    return request<DietPlanDto>(
+      `/api/v1/diet-plans/${encodeURIComponent(id)}/accept`,
+      { method: "POST", body: {} },
+    );
+  },
+  shoppingList(id: string): Promise<ShoppingListDto> {
+    return request<ShoppingListDto>(
+      `/api/v1/diet-plans/${encodeURIComponent(id)}/shopping-list`,
+      { method: "POST", body: {} },
+    );
+  },
+  adherence(id: string): Promise<AdherencePoint[]> {
+    return request<AdherencePoint[]>(
+      `/api/v1/diet-plans/${encodeURIComponent(id)}/adherence`,
+    );
   },
 };
 

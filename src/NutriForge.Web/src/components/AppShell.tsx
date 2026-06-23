@@ -2,6 +2,8 @@ import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
   BookOpen,
+  CalendarRange,
+  ChefHat,
   LayoutDashboard,
   MessageCircle,
   User,
@@ -13,6 +15,8 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/diary", label: "Diary", icon: BookOpen, end: false },
+  { to: "/recipes", label: "Recipes", icon: ChefHat, end: false },
+  { to: "/plan", label: "Diet Plan", icon: CalendarRange, end: false },
   { to: "/profile", label: "Profile", icon: User, end: false },
 ];
 

@@ -220,3 +220,151 @@ export interface LogProposal {
   fatG: number;
   carbG: number;
 }
+
+// ---- Recipes ----
+
+export interface RecipeSummary {
+  id: string;
+  name: string;
+  servings: number;
+  totalMinutes: number;
+  tags: string[];
+  isNutritionComputed: boolean;
+  kcalPerServing: number;
+  proteinPerServing: number;
+  fatPerServing: number;
+  carbPerServing: number;
+}
+
+export interface RecipeIngredient {
+  name: string;
+  quantity: number;
+  unit: string | null;
+  grams: number;
+  resolved: boolean;
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+}
+
+export interface RecipeDto extends RecipeSummary {
+  instructions: string | null;
+  ingredients: RecipeIngredient[];
+}
+
+export interface CreateRecipeIngredient {
+  quantity: number;
+  unit?: string;
+  name: string;
+}
+
+export interface CreateRecipeRequest {
+  name: string;
+  servings: number;
+  totalMinutes: number;
+  instructions?: string;
+  tags?: string[];
+  ingredients: CreateRecipeIngredient[];
+}
+
+export interface ScaledIngredient {
+  name: string;
+  quantity: number;
+  unit: string | null;
+  grams: number;
+}
+
+export interface RecipeScaleDto {
+  id: string;
+  name: string;
+  originalServings: number;
+  targetServings: number;
+  ingredients: ScaledIngredient[];
+  kcalPerServing: number;
+}
+
+// ---- Pantry ----
+
+export interface PantryItem {
+  id: string;
+  ingredientName: string;
+  grams: number;
+}
+
+export interface CreatePantryItemRequest {
+  ingredientName: string;
+  quantity: number;
+  unit?: string;
+}
+
+// ---- Shopping lists ----
+
+export interface ShoppingListItem {
+  ingredientName: string;
+  grams: number;
+  pantryCovered: boolean;
+}
+
+export interface ShoppingListAisle {
+  aisle: string;
+  items: ShoppingListItem[];
+}
+
+export interface ShoppingListDto {
+  id: string;
+  mealPlanId: string | null;
+  aisles: ShoppingListAisle[];
+}
+
+export interface CreateShoppingListRequest {
+  recipes: { recipeId: string; servings: number }[];
+}
+
+// ---- Diet plans ----
+
+export type DietPlanStatus = "Generating" | "Ready" | "Infeasible" | "Accepted";
+
+export interface DietPlanSlot {
+  day: number;
+  mealSlot: string;
+  recipeId: string;
+  recipeName: string;
+  servings: number;
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+}
+
+export interface DietPlanDto {
+  id: string;
+  status: DietPlanStatus;
+  targetKcal: number;
+  achievedKcal: number;
+  achievedProteinG: number;
+  achievedFatG: number;
+  achievedCarbG: number;
+  message: string | null;
+  slots: DietPlanSlot[];
+}
+
+export type DietSlug = "vegan" | "vegetarian" | "high-protein";
+
+export interface CreateDietPlanRequest {
+  desire?: string;
+  kcalTarget?: number;
+  dietSlug?: string;
+  excludeAllergens?: string[];
+  dislikes?: string[];
+  maxPrepMinutes?: number;
+  mealsPerDay?: number;
+  horizonDays?: number;
+}
+
+export interface AdherencePoint {
+  date: string;
+  plannedKcal: number;
+  loggedKcal: number;
+  adherencePct: number;
+}
