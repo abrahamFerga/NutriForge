@@ -49,6 +49,24 @@
    Tracking). The deeper agents — **MealSelectAgent** (SELECT) and the single-shot parsers
    (DietIntent/NlDiary/Ingredient/PlanExplainer) — remain inside epics 4 & 6.
 
+### Hardening & growth epics (8–12) — *cross-cutting, run alongside the product epics*
+
+Beyond the product build, these take the system from product-complete to **enterprise- and
+retention-complete**. They are tracked as epics 8–12 on the GitHub backlog.
+
+8. **Observability & SRE** — instrument the [`SPEC.md`](SPEC.md) success metrics (currently
+   uninstrumented), SLOs + alerting, OTel dashboards, OPERATIONS runbook, Postgres backup/PITR drill.
+9. **Security & Compliance hardening** — real Entra External ID OIDC in prod (dev-auth is
+   Development-only), security headers + secure cookies, signup consent / GDPR lawful basis, CI
+   security scanning (CodeQL/Trivy/secret-scan), adversarial review of the allergen-safety path.
+10. **Delivery & Quality gates** — run the Aspire integration tests + a Playwright E2E suite in CI,
+    container image build/scan/SBOM, coverage + mutation gates, ephemeral PR preview environments.
+11. **Retention & Onboarding** — first-run wizard, quick-add (favorites/recents/copy-yesterday),
+    meal templates, weight + water tracking, reminders + weekly summary, a11y/i18n/PWA polish.
+12. **Agentic Depth (MAF)** — streaming responses, cross-session personalization memory, guardrail
+    middleware (PII redaction + prompt-injection defense + output validation), proactive nudges,
+    token budgeting / per-user cost controls.
+
 ## Module list
 
 | Module (.NET project) | Bounded context | Capabilities served | Skills used to build it |
