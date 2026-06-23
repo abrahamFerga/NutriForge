@@ -16,6 +16,13 @@ indent_size = 2
 [*.md]
 trim_trailing_whitespace = false
 
+# EF Core migrations are generated code — don't hold them to the analyzer/style gate.
+[**/Migrations/**/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+dotnet_diagnostic.IDE0161.severity = none
+dotnet_diagnostic.CA1861.severity = none
+
 [*.cs]
 # Language conventions
 dotnet_sort_system_directives_first = true
@@ -37,3 +44,13 @@ dotnet_naming_style.prefixed_with_i.capitalization = pascal_case
 # Promote nullable / analyzer findings to build errors (paired with TreatWarningsAsErrors).
 dotnet_diagnostic.CA2007.severity = none
 dotnet_diagnostic.IDE0055.severity = warning
+
+# String-comparison/culture rules conflict with EF Core LINQ — inside an expression tree
+# `ToLower()`/`Contains()` are translated to SQL (lower()/LIKE), not run in .NET, so the
+# CultureInfo/StringComparison overloads these rules suggest are untranslatable. Demote to
+# suggestion so they don't fail the warnings-as-errors build on data-access code.
+dotnet_diagnostic.CA1304.severity = suggestion
+dotnet_diagnostic.CA1307.severity = suggestion
+dotnet_diagnostic.CA1310.severity = suggestion
+dotnet_diagnostic.CA1311.severity = suggestion
+dotnet_diagnostic.CA1862.severity = suggestion

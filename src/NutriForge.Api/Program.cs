@@ -1,23 +1,70 @@
+using System.Text.Json.Serialization;
+using NutriForge.Api.Auth;
+using NutriForge.Api.Endpoints;
+using NutriForge.Api.Middleware;
+using NutriForge.Api.Setup;
+using NutriForge.Application;
+using NutriForge.Application.Abstractions;
+using NutriForge.Infrastructure;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // OpenTelemetry + health checks + service discovery + HTTP resilience.
 builder.AddServiceDefaults();
+
+// Persistence, caching, audit-outbox, clock (Aspire-wired Postgres + Redis).
+builder.AddInfrastructure();
+
+// The request-scoped authenticated principal (overrides the worker's system principal).
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HttpCurrentUser>();
+
+// Application services + validators.
+builder.Services.AddApplication();
+
+// AuthN/Z, rate limiting, Problem Details, CORS, JSON.
+builder.Services.AddNutriForgeAuth(builder.Configuration, builder.Environment);
+builder.Services.AddNutriForgeRateLimiting();
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+var spaOrigin = builder.Configuration["Cors:SpaOrigin"] ?? "http://localhost:5173";
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
+    policy.WithOrigins(spaOrigin).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
 
-// /health (ready) and /alive (live).
-app.MapDefaultEndpoints();
+app.UseExceptionHandler();
+app.MapDefaultEndpoints(); // /health + /alive (anonymous)
 
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+app.UseCors();
+app.UseAuthentication();
+app.UseMiddleware<UserProvisioningMiddleware>(); // mirror OIDC subject → local user id
+app.UseRateLimiter();
+app.UseAuthorization();
+app.UseMiddleware<IdempotencyMiddleware>();      // replay-safe writes (needs the local user id)
 
-// Placeholder — replaced by the Food / Tracking / Recipes / DietGen endpoint
-// groups as each ROADMAP phase lands.
-app.MapGet("/ping", () => Results.Ok(new { status = "ok", service = "nutriforge-api" }));
+app.MapGet("/", () => Results.Ok(new { service = "nutriforge-api", status = "ok" }))
+    .AllowAnonymous().ExcludeFromDescription();
 
-app.Run();
+app.MapFoodEndpoints();
+app.MapTrackingEndpoints();
+app.MapMeEndpoints();
+app.MapAdminEndpoints();
+
+await app.InitializeDatabaseAsync();
+
+await app.RunAsync();
+
+/// <summary>Exposed so the Aspire integration tests can reference the API entry point.</summary>
+public partial class Program;

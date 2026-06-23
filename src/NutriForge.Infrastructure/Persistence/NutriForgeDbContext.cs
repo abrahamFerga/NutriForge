@@ -1,0 +1,148 @@
+using Microsoft.EntityFrameworkCore;
+using NutriForge.Application.Abstractions;
+using NutriForge.Domain.Catalog;
+using NutriForge.Domain.Common;
+using NutriForge.Domain.Diary;
+using NutriForge.Domain.Users;
+
+namespace NutriForge.Infrastructure.Persistence;
+
+/// <summary>
+/// The operational store (database <c>appdb</c>). Holds the public-read catalog (schema
+/// <c>catalog</c>) and the user-owned data + infra tables (schema <c>app</c>). A global query
+/// filter isolates every <see cref="IUserOwned"/> entity by the current user (ADR-0001); the
+/// catalog is unfiltered. Implements the Application context ports so handlers stay provider-free.
+/// </summary>
+/// <remarks>
+/// v1 uses a single operational context for delivery simplicity; the schema split keeps the
+/// catalog/user boundary honest and leaves room to split into per-context DbContexts later
+/// (ARCH "schema-per-bounded-context"). The audit log lives in a separate context/database.
+/// </remarks>
+public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> options, ICurrentUser currentUser)
+    : DbContext(options), ICatalogDbContext, IAppDbContext
+{
+    /// <summary>Referenced by the global query filter; EF parameterizes it per-query.</summary>
+    public Guid CurrentUserId => currentUser.UserId ?? Guid.Empty;
+
+    // Catalog (public-read)
+    public DbSet<Domain.Catalog.Food> Foods => Set<Domain.Catalog.Food>();
+    public DbSet<Portion> Portions => Set<Portion>();
+
+    // User-owned
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Profile> Profiles => Set<Profile>();
+    public DbSet<Target> Targets => Set<Target>();
+    public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
+
+    // Operational infra
+    public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(modelBuilder);
+        var b = modelBuilder;
+
+        // ---- Catalog schema ----
+        b.Entity<Domain.Catalog.Food>(e =>
+        {
+            e.ToTable("foods", "catalog");
+            e.HasKey(f => f.Id);
+            e.Property(f => f.Name).HasMaxLength(200).IsRequired();
+            e.Property(f => f.Brand).HasMaxLength(200);
+            e.Property(f => f.Gtin).HasMaxLength(14);
+            e.HasIndex(f => f.Gtin);
+            e.Property(f => f.VerificationStatus).HasConversion<string>().HasMaxLength(20);
+
+            e.OwnsOne(f => f.Source, s =>
+            {
+                s.Property(p => p.Provider).HasColumnName("source_provider").HasMaxLength(50).IsRequired();
+                s.Property(p => p.ProviderId).HasColumnName("source_provider_id").HasMaxLength(100).IsRequired();
+                s.HasIndex(p => new { p.Provider, p.ProviderId }).IsUnique();
+            });
+            e.Navigation(f => f.Source).IsRequired();
+
+            e.OwnsOne(f => f.NutrientProfile, n =>
+            {
+                n.Property(p => p.KcalPer100g).HasColumnName("kcal_per_100g");
+                n.Property(p => p.ProteinPer100g).HasColumnName("protein_per_100g");
+                n.Property(p => p.FatPer100g).HasColumnName("fat_per_100g");
+                n.Property(p => p.CarbPer100g).HasColumnName("carb_per_100g");
+                n.Property(p => p.FiberPer100g).HasColumnName("fiber_per_100g");
+                n.Property(p => p.SugarPer100g).HasColumnName("sugar_per_100g");
+                n.Property(p => p.SodiumMgPer100g).HasColumnName("sodium_mg_per_100g");
+            });
+            e.Navigation(f => f.NutrientProfile).IsRequired();
+
+            e.HasMany(f => f.Portions).WithOne().HasForeignKey(p => p.FoodId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(f => f.Portions).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        b.Entity<Portion>(e =>
+        {
+            e.ToTable("portions", "catalog");
+            e.HasKey(p => p.Id);
+            e.Property(p => p.Name).HasMaxLength(100).IsRequired();
+        });
+
+        // ---- App schema (user-owned) ----
+        b.Entity<User>(e =>
+        {
+            e.ToTable("users", "app");
+            e.HasKey(u => u.Id);
+            e.Property(u => u.OidcSubject).HasMaxLength(200).IsRequired();
+            e.HasIndex(u => u.OidcSubject).IsUnique();
+            e.Property(u => u.Email).HasMaxLength(320);
+            e.Property(u => u.DisplayName).HasMaxLength(200);
+        });
+
+        b.Entity<Profile>(e =>
+        {
+            e.ToTable("profiles", "app");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => p.UserId).IsUnique();
+            e.Property(p => p.Sex).HasConversion<string>().HasMaxLength(10);
+            e.Property(p => p.Activity).HasConversion<string>().HasMaxLength(20);
+            e.Property(p => p.Goal).HasConversion<string>().HasMaxLength(20);
+            e.Property(p => p.MacroStrategy).HasConversion<string>().HasMaxLength(20);
+            e.HasQueryFilter(p => p.UserId == CurrentUserId);
+        });
+
+        b.Entity<Target>(e =>
+        {
+            e.ToTable("targets", "app");
+            e.HasKey(t => t.Id);
+            e.HasIndex(t => t.UserId).IsUnique();
+            e.Property(t => t.Formula).HasMaxLength(300);
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
+        });
+
+        b.Entity<DiaryEntry>(e =>
+        {
+            e.ToTable("diary_entries", "app");
+            e.HasKey(d => d.Id);
+            e.HasIndex(d => new { d.UserId, d.Date });
+            e.Property(d => d.MealSlot).HasConversion<string>().HasMaxLength(20);
+            e.Property(d => d.FoodName).HasMaxLength(200);
+            e.Property(d => d.PortionName).HasMaxLength(100);
+            e.HasQueryFilter(d => d.UserId == CurrentUserId);
+        });
+
+        // ---- Operational infra ----
+        b.Entity<OutboxMessage>(e =>
+        {
+            e.ToTable("outbox", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.Type).HasMaxLength(50).IsRequired();
+            e.HasIndex(m => m.ProcessedAt);
+        });
+
+        b.Entity<IdempotencyRecord>(e =>
+        {
+            e.ToTable("idempotency", "app");
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Key).HasMaxLength(200).IsRequired();
+            e.HasIndex(r => new { r.Key, r.UserId }).IsUnique();
+        });
+    }
+}

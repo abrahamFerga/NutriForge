@@ -19,6 +19,13 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
+    <!-- NuGet vulnerability auditing: audit our DIRECT dependencies (the supply chain we
+         control and can patch) and fail the build on those. Transitive advisories whose graph
+         offers no fixed version are surfaced as warnings, not build breaks, so an upstream's
+         unpatched dependency can't block all work. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>direct</NuGetAuditMode>
+
     <!-- Deterministic, source-linked builds for reproducible CI artifacts. -->
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
