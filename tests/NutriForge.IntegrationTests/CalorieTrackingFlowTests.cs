@@ -126,4 +126,70 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         using var ok = await admin.GetAsync("/internal/import/status");
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
     }
+
+    [Fact]
+    public async Task Diet_plan_generates_to_ready_and_closes_the_loop_into_a_shopping_list()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"diet-{Guid.NewGuid():N}");
+
+        // A profile so there's a calorie target to generate against.
+        using (var put = await client.PutAsJsonAsync("/api/v1/profile", new
+        {
+            sex = "Male",
+            birthDate = "1996-06-23",
+            heightCm = 180.0,
+            weightKg = 80.0,
+            bodyFatPct = (double?)null,
+            activity = "ModeratelyActive",
+            goal = "ModerateCut",
+            macroStrategy = "ProteinAnchored",
+            allergens = Array.Empty<string>(),
+            dislikes = Array.Empty<string>(),
+            preferredDiets = Array.Empty<string>(),
+        }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        }
+
+        // Async generate (structured intent — no LLM key needed). 202 + a plan id.
+        using var gen = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diet-plans")
+        {
+            Content = JsonContent.Create(new { dietSlug = "high-protein", horizonDays = 3 }, options: Json),
+        };
+        gen.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using var genRes = await client.SendAsync(gen);
+        Assert.Equal(HttpStatusCode.Accepted, genRes.StatusCode);
+        var planId = (await genRes.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetString();
+
+        // Poll until the background worker finishes the plan.
+        JsonElement plan = default;
+        var status = "Generating";
+        for (var i = 0; i < 30 && status == "Generating"; i++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            plan = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diet-plans/{planId}", Json);
+            status = plan.GetProperty("status").GetString()!;
+        }
+
+        Assert.True(status == "Ready",
+            $"expected Ready; got {status} (message: {(plan.TryGetProperty("message", out var m) ? m.GetString() : "?")})");
+        Assert.True(plan.GetProperty("slots").GetArrayLength() > 0, "a ready plan has meal slots");
+        Assert.True(plan.GetProperty("achievedKcal").GetDouble() > 0);
+
+        // Accept it.
+        using var acc = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/diet-plans/{planId}/accept");
+        acc.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using (var accRes = await client.SendAsync(acc))
+        {
+            Assert.Equal(HttpStatusCode.OK, accRes.StatusCode);
+        }
+
+        // Closed loop: accepted plan → one consolidated, aisle-grouped shopping list.
+        using var sl = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/diet-plans/{planId}/shopping-list");
+        sl.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using var slRes = await client.SendAsync(sl);
+        Assert.Equal(HttpStatusCode.Created, slRes.StatusCode);
+        var list = await slRes.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.True(list.GetProperty("aisles").GetArrayLength() > 0, "the shopping list groups items by aisle");
+    }
 }

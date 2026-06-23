@@ -8,6 +8,7 @@
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Aspire.StackExchange.Redis" />
+    <PackageReference Include="Google.OrTools" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 

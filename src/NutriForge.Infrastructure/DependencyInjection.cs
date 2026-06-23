@@ -45,6 +45,10 @@ public static class DependencyInjection
         // The transactional-outbox relay (audit → separate DB).
         services.AddHostedService<OutboxDispatcher>();
 
+        // Diet generation: the OR-Tools LP portion optimizer (REPAIR) + the async generation worker.
+        services.AddSingleton<Application.DietGen.IPortionOptimizer, DietGen.OrToolsPortionOptimizer>();
+        services.AddHostedService<DietGen.DietPlanGenerationWorker>();
+
         return builder;
     }
 }

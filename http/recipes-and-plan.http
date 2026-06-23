@@ -1,0 +1,59 @@
+### Recipes, shopping & diet generation. Set @host from the Aspire dashboard's "api" endpoint.
+@host = https://localhost:7443
+@subject = demo-user
+
+### List recipes (seeded computed-nutrition recipes)
+GET {{host}}/api/v1/recipes
+X-Debug-Subject: {{subject}}
+
+### Create a recipe (nutrition is computed from resolved ingredients)
+POST {{host}}/api/v1/recipes
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "name": "Tofu rice bowl",
+  "servings": 2,
+  "totalMinutes": 20,
+  "tags": ["vegan", "high-protein", "dinner"],
+  "ingredients": [
+    { "quantity": 200, "unit": "g", "name": "tofu" },
+    { "quantity": 300, "unit": "g", "name": "white rice" },
+    { "quantity": 100, "unit": "g", "name": "spinach" }
+  ]
+}
+
+### Generate a diet plan (structured — no LLM key needed). Returns 202 + a plan id.
+POST {{host}}/api/v1/diet-plans
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{ "dietSlug": "high-protein", "horizonDays": 7 }
+
+### Free-text desire (needs an LLM provider configured)
+POST {{host}}/api/v1/diet-plans
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{ "desire": "high-protein vegan, around 2000 kcal, nothing with mushrooms, under 25 minutes" }
+
+### Poll the plan until status is ready | infeasible
+GET {{host}}/api/v1/diet-plans/REPLACE-WITH-PLAN-ID
+X-Debug-Subject: {{subject}}
+
+### Accept, then close the loop into a shopping list
+POST {{host}}/api/v1/diet-plans/REPLACE-WITH-PLAN-ID/accept
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+
+###
+POST {{host}}/api/v1/diet-plans/REPLACE-WITH-PLAN-ID/shopping-list
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+
+### Adherence: logged intake vs the plan this week
+GET {{host}}/api/v1/diet-plans/REPLACE-WITH-PLAN-ID/adherence
+X-Debug-Subject: {{subject}}

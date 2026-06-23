@@ -72,6 +72,7 @@ app.MapAdminEndpoints();
 app.MapAssistantEndpoints();
 app.MapRecipeEndpoints();
 app.MapPlanningEndpoints();
+app.MapDietPlanEndpoints();
 
 await app.InitializeDatabaseAsync();
 
