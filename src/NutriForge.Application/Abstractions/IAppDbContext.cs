@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NutriForge.Domain.Assistant;
 using NutriForge.Domain.Diary;
+using NutriForge.Domain.Planning;
 using NutriForge.Domain.Users;
 
 namespace NutriForge.Application.Abstractions;
@@ -16,6 +17,9 @@ public interface IAppDbContext
     DbSet<Target> Targets { get; }
     DbSet<DiaryEntry> DiaryEntries { get; }
     DbSet<AssistantSession> AssistantSessions { get; }
+    DbSet<PantryItem> PantryItems { get; }
+    DbSet<ShoppingList> ShoppingLists { get; }
+    DbSet<MealPlan> MealPlans { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

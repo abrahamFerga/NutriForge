@@ -17,6 +17,9 @@ public static class DependencyInjection
         services.AddScoped<TargetService>();
         services.AddScoped<DiaryService>();
         services.AddScoped<DiaryParseService>();
+        services.AddScoped<Recipes.RecipeService>();
+        services.AddScoped<Planning.PantryService>();
+        services.AddScoped<Planning.ShoppingListService>();
 
         services.AddValidatorsFromAssemblyContaining<SubmitFoodRequestValidator>(ServiceLifetime.Singleton);
 

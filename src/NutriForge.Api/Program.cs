@@ -70,6 +70,8 @@ app.MapTrackingEndpoints();
 app.MapMeEndpoints();
 app.MapAdminEndpoints();
 app.MapAssistantEndpoints();
+app.MapRecipeEndpoints();
+app.MapPlanningEndpoints();
 
 await app.InitializeDatabaseAsync();
 

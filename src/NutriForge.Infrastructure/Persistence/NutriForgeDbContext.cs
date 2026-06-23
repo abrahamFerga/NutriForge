@@ -4,6 +4,8 @@ using NutriForge.Domain.Assistant;
 using NutriForge.Domain.Catalog;
 using NutriForge.Domain.Common;
 using NutriForge.Domain.Diary;
+using NutriForge.Domain.Planning;
+using NutriForge.Domain.Recipes;
 using NutriForge.Domain.Users;
 
 namespace NutriForge.Infrastructure.Persistence;
@@ -28,6 +30,9 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     // Catalog (public-read)
     public DbSet<Domain.Catalog.Food> Foods => Set<Domain.Catalog.Food>();
     public DbSet<Portion> Portions => Set<Portion>();
+    public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<Ingredient> Ingredients => Set<Ingredient>();
+    public DbSet<DietType> DietTypes => Set<DietType>();
 
     // User-owned
     public DbSet<User> Users => Set<User>();
@@ -35,6 +40,9 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Target> Targets => Set<Target>();
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
+    public DbSet<PantryItem> PantryItems => Set<PantryItem>();
+    public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
+    public DbSet<MealPlan> MealPlans => Set<MealPlan>();
 
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
@@ -87,6 +95,43 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(p => p.Name).HasMaxLength(100).IsRequired();
         });
 
+        b.Entity<Ingredient>(e =>
+        {
+            e.ToTable("ingredients", "catalog");
+            e.HasKey(i => i.Id);
+            e.Property(i => i.CanonicalName).HasMaxLength(200).IsRequired();
+            e.Property(i => i.AisleCategory).HasMaxLength(50);
+            e.HasIndex(i => i.CanonicalName);
+        });
+
+        b.Entity<Recipe>(e =>
+        {
+            e.ToTable("recipes", "catalog");
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Name).HasMaxLength(300).IsRequired();
+            e.HasMany(r => r.Ingredients).WithOne().HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(r => r.Ingredients).UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasIndex(r => r.IsNutritionComputed);
+        });
+
+        b.Entity<RecipeIngredient>(e =>
+        {
+            e.ToTable("recipe_ingredients", "catalog");
+            e.HasKey(i => i.Id);
+            e.Property(i => i.RawText).HasMaxLength(300);
+            e.Property(i => i.IngredientName).HasMaxLength(200);
+            e.Property(i => i.Unit).HasMaxLength(40);
+        });
+
+        b.Entity<DietType>(e =>
+        {
+            e.ToTable("diet_types", "catalog");
+            e.HasKey(d => d.Id);
+            e.Property(d => d.Slug).HasMaxLength(50).IsRequired();
+            e.Property(d => d.Name).HasMaxLength(100).IsRequired();
+            e.HasIndex(d => d.Slug).IsUnique();
+        });
+
         // ---- App schema (user-owned) ----
         b.Entity<User>(e =>
         {
@@ -137,6 +182,53 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasIndex(s => s.UserId).IsUnique();
             e.Property(s => s.Data).HasColumnType("jsonb");
             e.HasQueryFilter(s => s.UserId == CurrentUserId);
+        });
+
+        b.Entity<PantryItem>(e =>
+        {
+            e.ToTable("pantry_items", "app");
+            e.HasKey(p => p.Id);
+            e.HasIndex(p => p.UserId);
+            e.Property(p => p.IngredientName).HasMaxLength(200);
+            e.HasQueryFilter(p => p.UserId == CurrentUserId);
+        });
+
+        b.Entity<ShoppingList>(e =>
+        {
+            e.ToTable("shopping_lists", "app");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.UserId);
+            e.HasMany(s => s.Items).WithOne().HasForeignKey(i => i.ShoppingListId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(s => s.Items).UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasQueryFilter(s => s.UserId == CurrentUserId);
+        });
+
+        b.Entity<ShoppingItem>(e =>
+        {
+            e.ToTable("shopping_items", "app");
+            e.HasKey(i => i.Id);
+            e.Property(i => i.IngredientName).HasMaxLength(200);
+            e.Property(i => i.AisleCategory).HasMaxLength(50);
+        });
+
+        b.Entity<MealPlan>(e =>
+        {
+            e.ToTable("meal_plans", "app");
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => new { m.UserId, m.Status });
+            e.Property(m => m.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(m => m.IntentJson).HasColumnType("jsonb");
+            e.HasMany(m => m.Slots).WithOne().HasForeignKey(s => s.MealPlanId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(m => m.Slots).UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        b.Entity<PlanSlot>(e =>
+        {
+            e.ToTable("plan_slots", "app");
+            e.HasKey(s => s.Id);
+            e.Property(s => s.MealSlot).HasConversion<string>().HasMaxLength(20);
+            e.Property(s => s.RecipeName).HasMaxLength(300);
         });
 
         // ---- Operational infra ----
