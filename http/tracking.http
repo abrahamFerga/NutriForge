@@ -1,0 +1,58 @@
+### Tracking — profile, targets, diary. Set @host from the Aspire dashboard's "api" endpoint.
+@host = https://localhost:7443
+@subject = demo-user
+@today = 2026-06-23
+
+### Set / update the profile (golden worked example → target 2345 kcal). Recomputes the target.
+PUT {{host}}/api/v1/profile
+X-Debug-Subject: {{subject}}
+X-Debug-Role: user
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "sex": "Male",
+  "birthDate": "1996-06-23",
+  "heightCm": 180,
+  "weightKg": 80,
+  "bodyFatPct": null,
+  "activity": "ModeratelyActive",
+  "goal": "ModerateCut",
+  "macroStrategy": "ProteinAnchored",
+  "allergens": ["peanuts"],
+  "dislikes": ["mushrooms"],
+  "preferredDiets": []
+}
+
+### Get the current profile
+GET {{host}}/api/v1/profile
+X-Debug-Subject: {{subject}}
+
+### Get the derived daily target
+GET {{host}}/api/v1/targets
+X-Debug-Subject: {{subject}}
+
+### Log a diary entry (foodId + portionId come from a foods/search result)
+POST {{host}}/api/v1/diary
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "date": "{{today}}",
+  "mealSlot": "Breakfast",
+  "foodId": "REPLACE-WITH-FOOD-ID",
+  "portionId": "REPLACE-WITH-PORTION-ID",
+  "quantity": 2
+}
+
+### Get the day's diary + rollup vs. target
+GET {{host}}/api/v1/diary?date={{today}}
+X-Debug-Subject: {{subject}}
+
+### 7-day calorie trend
+GET {{host}}/api/v1/diary/trend?days=7
+X-Debug-Subject: {{subject}}
+
+### Anonymous call (no subject header) → expect 401
+GET {{host}}/api/v1/targets

@@ -1,0 +1,22 @@
+### GDPR + admin surfaces. Set @host from the Aspire dashboard's "api" endpoint.
+@host = https://localhost:7443
+@subject = demo-user
+
+### GDPR Article 20 — export the full data bundle
+GET {{host}}/api/v1/me/export
+X-Debug-Subject: {{subject}}
+
+### GDPR Article 17 — erase the account (purges user-owned rows, tombstones the identity)
+DELETE {{host}}/api/v1/me
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+
+### Admin: connector/import registry status (requires the admin role → 403 for a plain user)
+GET {{host}}/internal/import/status
+X-Debug-Subject: admin-user
+X-Debug-Role: admin
+
+### Same call as a plain user → expect 403 Forbidden
+GET {{host}}/internal/import/status
+X-Debug-Subject: {{subject}}
+X-Debug-Role: user

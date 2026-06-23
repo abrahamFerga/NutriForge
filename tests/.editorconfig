@@ -3,3 +3,6 @@
 # Underscored test method names (Method_State_Expectation) are intentional and
 # idiomatic in xUnit tests; don't flag them.
 dotnet_diagnostic.CA1707.severity = none
+
+# xUnit [CollectionDefinition] marker classes idiomatically end in 'Collection'.
+dotnet_diagnostic.CA1711.severity = none

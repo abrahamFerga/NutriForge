@@ -21,7 +21,14 @@ public sealed class DevAuthenticationHandler(
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        var subject = Request.Headers["X-Debug-Subject"].FirstOrDefault() ?? "dev-user";
+        // No subject header ⇒ treat the request as anonymous (mirrors a real bearer-less request),
+        // so protected endpoints still challenge with 401. Present ⇒ authenticate as that subject.
+        var subject = Request.Headers["X-Debug-Subject"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
         var role = Request.Headers["X-Debug-Role"].FirstOrDefault() ?? Roles.User;
 
         var claims = new[]

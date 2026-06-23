@@ -1,0 +1,32 @@
+### Foods — search, get, barcode, submit. Set @host from the Aspire dashboard's "api" endpoint.
+@host = https://localhost:7443
+@subject = demo-user
+
+### Search the verification-tiered catalog (Redis-cached). The dev seeder includes "egg".
+GET {{host}}/api/v1/foods/search?q=egg
+X-Debug-Subject: {{subject}}
+
+### Get one food by id
+GET {{host}}/api/v1/foods/REPLACE-WITH-FOOD-ID
+X-Debug-Subject: {{subject}}
+
+### Barcode lookup (returns the lowest-tier match for a GTIN)
+GET {{host}}/api/v1/foods/barcode/0123456789012
+X-Debug-Subject: {{subject}}
+
+### Submit a user food (lands at the user-submitted tier; audited)
+POST {{host}}/api/v1/foods
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "name": "Homemade granola",
+  "brand": null,
+  "gtin": null,
+  "kcalPer100g": 471,
+  "proteinPer100g": 10.0,
+  "fatPer100g": 20.0,
+  "carbPer100g": 64.0,
+  "portions": [{ "name": "1/2 cup", "grams": 60 }]
+}

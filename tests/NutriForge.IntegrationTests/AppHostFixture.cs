@@ -1,0 +1,76 @@
+using System.Net.Http.Headers;
+using Aspire.Hosting;
+
+namespace NutriForge.IntegrationTests;
+
+/// <summary>
+/// Boots the whole NutriForge AppHost once per test collection — real Postgres (operational +
+/// audit) and Redis containers, real connection strings injected by Aspire, real migrations
+/// applied at startup. The SPA (npm app) is skipped via <c>SKIP_NPM_APPS</c> so tests don't
+/// start the Vite dev server.
+/// </summary>
+public sealed class AppHostFixture : IAsyncLifetime
+{
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(5);
+
+    public DistributedApplication App { get; private set; } = null!;
+
+    public async Task InitializeAsync()
+    {
+        Environment.SetEnvironmentVariable("SKIP_NPM_APPS", "true");
+
+        var builder = await DistributedApplicationTestingBuilder
+            .CreateAsync<Projects.NutriForge_AppHost>();
+
+        App = await builder.BuildAsync();
+        await App.StartAsync().WaitAsync(StartupTimeout);
+
+        // StartAsync returns before resources are ready — wait for the API process to be running.
+        await App.ResourceNotifications
+            .WaitForResourceAsync("api", KnownResourceStates.Running)
+            .WaitAsync(StartupTimeout);
+    }
+
+    public async Task DisposeAsync() => await App.DisposeAsync();
+
+    /// <summary>
+    /// An HTTP client for the API, pre-authenticated as a test user via the Development dev-auth
+    /// scheme, and only returned once the API actually answers requests (migrations applied).
+    /// </summary>
+    public async Task<HttpClient> CreateReadyClientAsync(string subject = "itest-user", string role = "user")
+    {
+        var client = App.CreateHttpClient("api");
+        client.Timeout = TimeSpan.FromSeconds(100);
+        client.DefaultRequestHeaders.Add("X-Debug-Subject", subject);
+        client.DefaultRequestHeaders.Add("X-Debug-Role", role);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        // Poll the anonymous root until the app is serving (startup migrations + seeding done).
+        var deadline = DateTime.UtcNow + StartupTimeout;
+        while (true)
+        {
+            try
+            {
+                using var res = await client.GetAsync("/");
+                if (res.StatusCode == HttpStatusCode.OK)
+                {
+                    return client;
+                }
+            }
+            catch (HttpRequestException)
+            {
+                // not up yet
+            }
+
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("API did not become ready within the startup timeout.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+    }
+}
+
+[CollectionDefinition("AppHost")]
+public sealed class AppHostCollection : ICollectionFixture<AppHostFixture>;

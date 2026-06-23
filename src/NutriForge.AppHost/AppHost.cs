@@ -6,12 +6,12 @@
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Postgres password is a secret parameter -> user-secrets (dev) / env (CI).
-var dbPassword = builder.AddParameter("postgres-password", secret: true);
-
-var postgres = builder.AddPostgres("postgres", password: dbPassword)
-    .WithLifetime(ContainerLifetime.Persistent) // reuse the container across `aspire run`
-    .WithDataVolume();                           // persist data between runs
+// Postgres with an Aspire-generated password (persisted to user-secrets for `dotnet run`;
+// regenerated per run in CI/tests, where containers start clean). Production does NOT run this
+// AppHost — Terraform/Container Apps inject the real connection strings (ADR-0013) — so no
+// hand-managed secret parameter is needed here. Ephemeral container (no data volume) keeps dev
+// and integration-test runs deterministic: a fresh password never collides with a stale volume.
+var postgres = builder.AddPostgres("postgres");
 
 var appDb = postgres.AddDatabase("appdb");       // foods, recipes, diary, plans, outbox, idempotency
 var auditDb = postgres.AddDatabase("auditdb");   // append-only audit, outside the operational DB
@@ -26,13 +26,17 @@ var api = builder.AddProject<Projects.NutriForge_Api>("api")
     .WithExternalHttpEndpoints();
 
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
-// backend (the API's CORS policy allows this origin).
-builder.AddNpmApp("web", "../NutriForge.Web", "dev")
-    .WithReference(api).WaitFor(api)
-    .WithEnvironment("VITE_API_BASE", api.GetEndpoint("http"))
-    .WithHttpEndpoint(env: "PORT")
-    .WithExternalHttpEndpoints()
-    .PublishAsDockerFile();
+// backend (the API's CORS policy allows this origin). Skipped under integration tests
+// (SKIP_NPM_APPS=true) so they don't boot the Node dev server.
+if (!string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase))
+{
+    builder.AddNpmApp("web", "../NutriForge.Web", "dev")
+        .WithReference(api).WaitFor(api)
+        .WithEnvironment("VITE_API_BASE", api.GetEndpoint("http"))
+        .WithHttpEndpoint(env: "PORT")
+        .WithExternalHttpEndpoints()
+        .PublishAsDockerFile();
+}
 
 // Import worker — nightly USDA / Open Food Facts sync; never on a request path.
 builder.AddProject<Projects.NutriForge_ImportWorker>("import-worker")
