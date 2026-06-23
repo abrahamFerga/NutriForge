@@ -183,3 +183,27 @@ export const diaryApi = {
     return request<TrendPoint[]>(`/api/v1/diary/trend?days=${days}`);
   },
 };
+
+// ---- Assistant (MAF NutritionAssistant) ----
+
+export interface AssistantStatus {
+  configured: boolean;
+}
+export interface AssistantReply {
+  reply: string;
+}
+
+export const assistantApi = {
+  status(): Promise<AssistantStatus> {
+    return request<AssistantStatus>("/api/v1/assistant/status");
+  },
+  chat(message: string): Promise<AssistantReply> {
+    return request<AssistantReply>("/api/v1/assistant/chat", {
+      method: "POST",
+      body: { message },
+    });
+  },
+  clear(): Promise<void> {
+    return request<void>("/api/v1/assistant/session", { method: "DELETE" });
+  },
+};

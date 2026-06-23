@@ -91,6 +91,24 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
     }
 
     [Fact]
+    public async Task Assistant_endpoint_is_wired_and_degrades_gracefully_without_a_provider()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"ai-{Guid.NewGuid():N}");
+
+        // The agentic surface exists; with no provider configured it reports unconfigured...
+        var status = await client.GetFromJsonAsync<JsonElement>("/api/v1/assistant/status", Json);
+        Assert.False(status.GetProperty("configured").GetBoolean());
+
+        // ...and a chat attempt degrades to 503 Problem Details rather than failing the request.
+        using var chat = new HttpRequestMessage(HttpMethod.Post, "/api/v1/assistant/chat")
+        {
+            Content = JsonContent.Create(new { message = "How many calories do I have left?" }, options: Json),
+        };
+        using var res = await client.SendAsync(chat);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+    }
+
+    [Fact]
     public async Task Unauthenticated_requests_are_rejected_and_admin_surface_is_gated()
     {
         // A separate client with NO dev-auth headers is anonymous.

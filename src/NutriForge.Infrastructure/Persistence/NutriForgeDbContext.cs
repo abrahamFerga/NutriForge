@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NutriForge.Application.Abstractions;
+using NutriForge.Domain.Assistant;
 using NutriForge.Domain.Catalog;
 using NutriForge.Domain.Common;
 using NutriForge.Domain.Diary;
@@ -33,6 +34,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<Target> Targets => Set<Target>();
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
+    public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
 
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
@@ -126,6 +128,15 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(d => d.FoodName).HasMaxLength(200);
             e.Property(d => d.PortionName).HasMaxLength(100);
             e.HasQueryFilter(d => d.UserId == CurrentUserId);
+        });
+
+        b.Entity<AssistantSession>(e =>
+        {
+            e.ToTable("assistant_sessions", "app");
+            e.HasKey(s => s.Id);
+            e.HasIndex(s => s.UserId).IsUnique();
+            e.Property(s => s.Data).HasColumnType("jsonb");
+            e.HasQueryFilter(s => s.UserId == CurrentUserId);
         });
 
         // ---- Operational infra ----

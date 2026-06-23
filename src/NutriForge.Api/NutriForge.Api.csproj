@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\NutriForge.Application\NutriForge.Application.csproj" />
     <ProjectReference Include="..\NutriForge.Infrastructure\NutriForge.Infrastructure.csproj" />
+    <ProjectReference Include="..\NutriForge.Infrastructure.Ai\NutriForge.Infrastructure.Ai.csproj" />
     <ProjectReference Include="..\NutriForge.ServiceDefaults\NutriForge.ServiceDefaults.csproj" />
   </ItemGroup>
 

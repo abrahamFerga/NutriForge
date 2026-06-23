@@ -6,6 +6,7 @@ using NutriForge.Api.Setup;
 using NutriForge.Application;
 using NutriForge.Application.Abstractions;
 using NutriForge.Infrastructure;
+using NutriForge.Infrastructure.Ai;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,6 +15,9 @@ builder.AddServiceDefaults();
 
 // Persistence, caching, audit-outbox, clock (Aspire-wired Postgres + Redis).
 builder.AddInfrastructure();
+
+// The agentic layer: MAF NutritionAssistant (provider-swappable; unconfigured ⇒ 503).
+builder.AddAiAssistant();
 
 // The request-scoped authenticated principal (overrides the worker's system principal).
 builder.Services.AddHttpContextAccessor();
@@ -61,6 +65,7 @@ app.MapFoodEndpoints();
 app.MapTrackingEndpoints();
 app.MapMeEndpoints();
 app.MapAdminEndpoints();
+app.MapAssistantEndpoints();
 
 await app.InitializeDatabaseAsync();
 

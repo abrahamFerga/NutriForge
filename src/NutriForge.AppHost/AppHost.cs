@@ -25,6 +25,16 @@ var api = builder.AddProject<Projects.NutriForge_Api>("api")
     .WithReference(cache).WaitFor(cache)
     .WithExternalHttpEndpoints();
 
+// Light up the MAF NutritionAssistant when an OpenAI key is present in the environment
+// (`export OPENAI_API_KEY=sk-...` before `dotnet run`). No secret lives in source — it's read
+// from the env and forwarded to the API's `Ai` config. Otherwise the assistant reports 503.
+if (Environment.GetEnvironmentVariable("OPENAI_API_KEY") is { Length: > 0 } openAiKey)
+{
+    api.WithEnvironment("Ai__Provider", "OpenAI")
+        .WithEnvironment("Ai__Model", Environment.GetEnvironmentVariable("OPENAI_CHAT_MODEL_NAME") ?? "gpt-4o-mini")
+        .WithEnvironment("Ai__ApiKey", openAiKey);
+}
+
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
 // backend (the API's CORS policy allows this origin). Skipped under integration tests
 // (SKIP_NPM_APPS=true) so they don't boot the Node dev server.

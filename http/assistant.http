@@ -1,0 +1,27 @@
+### NutritionAssistant (MAF). Set @host from the Aspire dashboard's "api" endpoint.
+### The assistant is live only when a provider is configured (e.g. OPENAI_API_KEY set);
+### otherwise /chat returns 503 by design.
+@host = https://localhost:7443
+@subject = demo-user
+
+### Is a chat provider configured?
+GET {{host}}/api/v1/assistant/status
+X-Debug-Subject: {{subject}}
+
+### Ask the assistant — it calls read tools (search/targets/today/profile); code owns the numbers.
+POST {{host}}/api/v1/assistant/chat
+X-Debug-Subject: {{subject}}
+Content-Type: application/json
+
+{ "message": "How many calories do I have left today, and what's my protein target?" }
+
+### Another turn (the conversation is persisted per user)
+POST {{host}}/api/v1/assistant/chat
+X-Debug-Subject: {{subject}}
+Content-Type: application/json
+
+{ "message": "Find me some high-protein foods." }
+
+### Clear the conversation
+DELETE {{host}}/api/v1/assistant/session
+X-Debug-Subject: {{subject}}

@@ -79,6 +79,12 @@ and **Epics 1–3 (Foundations, Food & Nutrition Core, Calorie Tracking)** are b
 - **Frontend** (`src/NutriForge.Web`): Vite + React + TS + Tailwind + shadcn-style UI + TanStack
   Query — dashboard (calorie ring, macros, weekly trend), diary (search → log), profile, and the
   always-present NutritionAssistant slide-over.
+- **Agentic** (`src/NutriForge.Infrastructure.Ai`): the **NutritionAssistant** on **Microsoft
+  Agent Framework** (`Microsoft.Agents.AI`). A `ChatClientAgent` with read tools (`search_foods`,
+  `get_daily_targets`, `get_today_summary`, `get_profile`) routed through the same Application
+  services as the REST API — so the LLM proposes and narrates, but **deterministic code owns every
+  number** (ADR-0004). Provider-swappable (OpenAI primary), per-user persisted sessions, served at
+  `POST /api/v1/assistant/chat`.
 - **Tests** (`tests/`): the TDEE golden test, the calorie safety-floor guard, diary-snapshot
   immutability, and per-user isolation — all green.
 
@@ -106,6 +112,10 @@ dotnet build NutriForge.slnx
 # run the whole system (API + Postgres + Redis + SPA) — needs Docker running
 ./scripts/run-and-wait.ps1          # or: dotnet run --project src/NutriForge.AppHost
 #   → open the Aspire dashboard URL it prints; the SPA + API resources are listed there.
+
+# enable the live NutritionAssistant (one env var; the AppHost forwards it to the API):
+#   export OPENAI_API_KEY=sk-...     # then run the AppHost — the chatbot panel goes live.
+#   (Unset ⇒ the assistant reports 503 by design; everything else works without a key.)
 
 # tests: 12/12 green. Integration tests boot the real AppHost (Postgres + Redis) via Docker.
 dotnet test NutriForge.slnx

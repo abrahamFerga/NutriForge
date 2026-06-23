@@ -37,6 +37,18 @@
 
 > Differentiators (epics 5–6) come last so they can slip without blocking the v1 tracking MVP.
 
+7. **Agentic Assistant (MAF)** *(cross-cutting, brought forward)* — the always-present
+   **NutritionAssistant** chatbot from [`ARCH.md`](ARCH.md#maf-agents), built on **Microsoft Agent
+   Framework** (`Microsoft.Agents.AI`) over MEAI `IChatClient`. It makes the platform agentic on
+   top of whatever capabilities exist: v1 ships **read tools** (`search_foods`,
+   `get_daily_targets`, `get_today_summary`, `get_profile`) routed through the same Application
+   handlers as the REST API, so deterministic code still owns every number (ADR-0004). Provider is
+   swappable via config (OpenAI primary; Azure OpenAI / Ollama supported); conversations persist
+   per user. Side-effecting tools (e.g. `log_food`) land next, **approval-gated** per the MAF
+   guardrail. Depends on: Foundations + the capabilities each tool fronts (today: Food Core +
+   Tracking). The deeper agents — **MealSelectAgent** (SELECT) and the single-shot parsers
+   (DietIntent/NlDiary/Ingredient/PlanExplainer) — remain inside epics 4 & 6.
+
 ## Module list
 
 | Module (.NET project) | Bounded context | Capabilities served | Skills used to build it |

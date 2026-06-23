@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NutriForge.Application.Tracking;
+using NutriForge.Infrastructure.Ai.Assistant;
 
 namespace NutriForge.Api.Setup;
 
@@ -23,6 +24,7 @@ public sealed partial class GlobalExceptionHandler(IProblemDetailsService proble
                 .GroupBy(e => e.PropertyName)
                 .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray())),
             FoodNotFoundException => (StatusCodes.Status404NotFound, "Food not found", null),
+            AssistantNotConfiguredException => (StatusCodes.Status503ServiceUnavailable, "Assistant unavailable", null),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred", null),
         };
 
