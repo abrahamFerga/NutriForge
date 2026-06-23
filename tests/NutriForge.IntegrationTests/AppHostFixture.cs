@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Net.Http.Headers;
 using Aspire.Hosting;
 
@@ -21,6 +22,14 @@ public sealed class AppHostFixture : IAsyncLifetime
 
         var builder = await DistributedApplicationTestingBuilder
             .CreateAsync<Projects.NutriForge_AppHost>();
+
+        // The API serves over HTTPS with the local dev cert, which isn't trusted on CI agents.
+        // Accept any server cert for the TEST clients only (this never ships in the app).
+        builder.Services.ConfigureHttpClientDefaults(http =>
+            http.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+            }));
 
         App = await builder.BuildAsync();
         await App.StartAsync().WaitAsync(StartupTimeout);

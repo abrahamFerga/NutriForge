@@ -40,6 +40,8 @@ env:
 jobs:
   build:
     name: Build & push images
+    # Skip (don't fail) until Azure is wired: set the repo variable DEPLOY_ENABLED=true.
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

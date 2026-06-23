@@ -36,6 +36,8 @@ env:
 jobs:
   plan:
     name: Plan
+    # Skip (don't fail) until Azure is wired: set the repo variable DEPLOY_ENABLED=true.
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
