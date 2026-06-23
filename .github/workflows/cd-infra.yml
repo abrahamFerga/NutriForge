@@ -1,0 +1,140 @@
+name: CD Infra (Terraform)
+
+# Provisions Azure infrastructure with Terraform via GitHub OIDC.
+#   - Pull request  -> terraform plan only (speculative; no apply).
+#   - Push to main  -> plan then apply, gated by the "prod" environment.
+#
+# Authentication is OIDC / Workload Identity Federation. There is NO stored
+# client secret -- a short-lived federated token is exchanged at run time.
+
+on:
+  push:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/cd-infra.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["infra/**", ".github/workflows/cd-infra.yml"]
+
+# Required for OIDC. id-token: write lets the runner mint the federated token.
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write # to post the plan summary back onto the PR
+
+env:
+  # These come from GitHub repo/environment variables (NOT secrets -- they are
+  # identifiers, not credentials). The federated trust is what authorizes use.
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ARM_USE_OIDC: "true"
+  TF_WORKING_DIR: infra
+  TF_STATE_RG: ${{ vars.TFSTATE_RESOURCE_GROUP }}
+  TF_STATE_SA: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+  TF_STATE_CONTAINER: ${{ vars.TFSTATE_CONTAINER }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    outputs:
+      env_name: ${{ steps.pick.outputs.env_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.0"
+
+      - name: Select environment
+        id: pick
+        # main -> prod, PRs -> dev. Adjust to your branching model.
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "env_name=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "env_name=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Terraform init
+        run: >
+          terraform init
+          -backend-config="resource_group_name=${{ env.TF_STATE_RG }}"
+          -backend-config="storage_account_name=${{ env.TF_STATE_SA }}"
+          -backend-config="container_name=${{ env.TF_STATE_CONTAINER }}"
+          -backend-config="key=${{ steps.pick.outputs.env_name }}.tfstate"
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: >
+          terraform plan
+          -var-file="environments/${{ steps.pick.outputs.env_name }}.tfvars"
+          -out=tfplan
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ steps.pick.outputs.env_name }}
+          path: ${{ env.TF_WORKING_DIR }}/tfplan
+          if-no-files-found: error
+
+  apply:
+    name: Apply
+    needs: plan
+    # Only apply from main. PRs stop after plan.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # The environment gate enforces required reviewers / approvals before apply.
+    environment: prod
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.0"
+
+      - name: Terraform init
+        run: >
+          terraform init
+          -backend-config="resource_group_name=${{ env.TF_STATE_RG }}"
+          -backend-config="storage_account_name=${{ env.TF_STATE_SA }}"
+          -backend-config="container_name=${{ env.TF_STATE_CONTAINER }}"
+          -backend-config="key=${{ needs.plan.outputs.env_name }}.tfstate"
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ needs.plan.outputs.env_name }}
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve tfplan

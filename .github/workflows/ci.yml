@@ -1,0 +1,57 @@
+name: CI
+
+# Build, test, and format-check on every push to main and on PRs.
+# No cloud credentials are needed here, so no id-token permission is granted.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  build-test:
+    name: Build, format, test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (pinned by global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Verify formatting
+        # Fails the build if any file is not formatted to the repo conventions.
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test
+          --configuration Release
+          --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --collect "XPlat Code Coverage"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/TestResults/**/*"
+          if-no-files-found: ignore

@@ -1,0 +1,44 @@
+@startuml c3-components-dietgen
+' C4 Level 3 — DietGen pipeline (the flagship). Shows the AI boundary:
+' LLM owns intent/taste/explanation; deterministic code owns every number + safety gate.
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title NutriForge — DietGen Pipeline (C4 L3)
+
+System_Ext(llm, "LLM provider", "MEAI IChatClient, structured output")
+ContainerDb(pg, "Operational DB", "PostgreSQL", "Recipes, foods, MealPlan, outbox")
+
+Container_Boundary(diet, "Application.DietGen (async BackgroundService)") {
+    Component(parse, "1. PARSE", "LLM — structured output", "free text → typed DietIntent (cached by normalized desire). Merges profile + desire constraints.")
+    Component(filter, "2. FILTER", "Deterministic predicate query", "candidate pool: satisfiesDiet AND none(allergens) AND none(dislikes) AND time AND nutrition-computed. SAFETY gate.")
+    Component(select, "3. SELECT", "MealSelectAgent (MAF) + QueryCandidatePool tool", "sees only candidate rows → returns PlanSlot[] (ids + servings). Cannot return a number.")
+    Component(verify, "4. VERIFY", "Deterministic — trust anchor", "compute real nutrition from store vs Target; re-assert allergen exclusion. |Δkcal| ≤ ~5%.")
+    Component(repair, "5. REPAIR", "OR-Tools LP, then bounded re-select", "5a portion-tune (m∈[0.5,2.0]); 5b re-select with quantified gap, ≤3 iterations.")
+    Component(explain, "6. EXPLAIN", "LLM — narration", "narrate the ALREADY-VERIFIED plan. Reports facts; generates none.")
+}
+
+Component(targets, "NutritionTargets", "Domain (pure math)", "Target tuple for VERIFY/REPAIR")
+
+Rel(parse, llm, "structured output", "HTTPS, Polly")
+Rel(parse, filter, "DietIntent")
+Rel(filter, pg, "predicate query", "EF Core")
+Rel(filter, select, "candidate pool")
+Rel(select, llm, "grounded SELECT", "HTTPS, Polly")
+Rel(select, verify, "PlanSlot[]")
+Rel(targets, verify, "target")
+Rel(verify, explain, "accept")
+Rel(verify, repair, "reject")
+Rel(repair, verify, "re-check (LP)")
+Rel(repair, select, "re-select w/ gap (≤3)")
+Rel(explain, llm, "narrate", "HTTPS, Polly")
+Rel(explain, pg, "persist MealPlan", "EF Core")
+
+note right of repair
+  Infeasible after the bounded loop →
+  honest Problem Details response with
+  the quantified gap + suggested relaxations.
+  Never a padded, constraint-violating plan.
+end note
+
+SHOW_LEGEND()
+@enduml

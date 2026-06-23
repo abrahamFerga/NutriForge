@@ -1,0 +1,115 @@
+name: CD App (Container Apps)
+
+# Builds the API + import-worker container images with the .NET SDK (no
+# Dockerfile needed -- `/t:PublishContainer`), pushes them to ACR, then rolls
+# the Container App + Job to the new image. Auth is GitHub OIDC -- no registry
+# username/password, no publish profile.
+#
+# Runs after infra exists. The repo/environment variables below are set from
+# the Terraform outputs (acr_login_server, acr_name, api_app_name,
+# import_job_name, resource_group_name).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["infra/**", "**/*.md", "docs/**"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        type: choice
+        options: [dev, prod]
+        default: prod
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+  API_PROJECT: src/NutriForge.Api/NutriForge.Api.csproj
+  WORKER_PROJECT: src/NutriForge.ImportWorker/NutriForge.ImportWorker.csproj
+  API_REPO: nutriforge-api
+  WORKER_REPO: nutriforge-import
+
+jobs:
+  build:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (pinned by global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        # Populates the local registry credential store so SDK push succeeds.
+        run: az acr login --name "${{ env.ACR_NAME }}"
+
+      - name: Publish API image
+        run: >
+          dotnet publish ${{ env.API_PROJECT }}
+          --configuration Release
+          --os linux --arch x64
+          /t:PublishContainer
+          -p:ContainerRegistry=${{ env.ACR_LOGIN_SERVER }}
+          -p:ContainerRepository=${{ env.API_REPO }}
+          -p:ContainerImageTag=${{ github.sha }}
+
+      - name: Publish import-worker image
+        run: >
+          dotnet publish ${{ env.WORKER_PROJECT }}
+          --configuration Release
+          --os linux --arch x64
+          /t:PublishContainer
+          -p:ContainerRegistry=${{ env.ACR_LOGIN_SERVER }}
+          -p:ContainerRepository=${{ env.WORKER_REPO }}
+          -p:ContainerImageTag=${{ github.sha }}
+
+  deploy:
+    name: Roll Container App + Job
+    needs: build
+    runs-on: ubuntu-latest
+    # Environment gate: required reviewers + the env's vars (app/job names,
+    # resource group) live here. Defaults to prod for push; honors dispatch.
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.ARM_CLIENT_ID }}
+          tenant-id: ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Update API container app
+        run: >
+          az containerapp update
+          --name "${{ vars.API_APP_NAME }}"
+          --resource-group "${{ vars.RESOURCE_GROUP }}"
+          --image "${{ env.ACR_LOGIN_SERVER }}/${{ env.API_REPO }}:${{ github.sha }}"
+
+      - name: Update import job image
+        run: >
+          az containerapp job update
+          --name "${{ vars.IMPORT_JOB_NAME }}"
+          --resource-group "${{ vars.RESOURCE_GROUP }}"
+          --image "${{ env.ACR_LOGIN_SERVER }}/${{ env.WORKER_REPO }}:${{ github.sha }}"
+
+      - name: Logout
+        if: always()
+        run: az logout || true

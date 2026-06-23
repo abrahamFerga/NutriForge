@@ -1,0 +1,33 @@
+<Project>
+
+  <!--
+    Directory.Build.props
+    MSBuild auto-imports this for every project below this folder, so shared
+    conventions live in ONE place instead of being copy-pasted into each .csproj.
+    NutriForge backbone: net10.0, nullable, warnings-as-errors, deterministic CI builds.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Treat warnings as errors so CI catches them, and surface analyzer hits. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Deterministic, source-linked builds for reproducible CI artifacts. -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Don't require XML doc comments on every public member (CS1591); we still
+         generate the doc file for IntelliSense. Drop this to enforce docs later. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- Central Package Management lives in Directory.Packages.props (sibling). -->
+
+</Project>

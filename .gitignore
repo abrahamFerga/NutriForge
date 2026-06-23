@@ -1,0 +1,45 @@
+# ---- .NET ----
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+*.user
+*.suo
+.vs/
+artifacts/
+TestResults/
+*.trx
+*.coverage
+coverage/
+
+# ---- Aspire / local secrets ----
+**/appsettings.*.local.json
+*.received.*
+.aspire/
+
+# ---- Node / Vite (NutriForge.Web) ----
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Terraform (infra/) ----
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# ---- IDE / OS ----
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

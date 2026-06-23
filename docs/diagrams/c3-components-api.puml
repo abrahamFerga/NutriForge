@@ -1,0 +1,65 @@
+@startuml c3-components-api
+' C4 Level 3 — Components inside the API container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title NutriForge — API Components (C4 L3)
+
+Container(spa, "SPA", "React")
+ContainerDb(pg, "Operational DB", "PostgreSQL")
+ContainerDb(redis, "Cache", "Redis")
+System_Ext(llm, "LLM provider", "via MEAI")
+
+Container_Boundary(api, "NutriForge.Api (modular monolith)") {
+    Component(foodEp, "Food endpoints", "Minimal API group", "/foods, /ingredients — search, barcode, get, user-submit")
+    Component(trackEp, "Tracking endpoints", "Minimal API group", "/profile, /targets, /diary, /diary/parse")
+    Component(recipeEp, "Recipe endpoints", "Minimal API group", "/recipes, /pantry, /shopping-lists")
+    Component(dietEp, "DietGen endpoints", "Minimal API group", "/diet-plans (async 202 + poll)")
+    Component(meEp, "Compliance endpoints", "Minimal API group", "/me/export, DELETE /me (GDPR)")
+    Component(assistEp, "Assistant endpoint", "Minimal API group", "Chatbot slide-over (NutritionAssistant)")
+
+    Component(behaviors, "Pipeline behaviors", "Shared (NutriForge.Application)", "AuthZ policy, validation, idempotency (24h), audit interceptor, tenant query filter")
+
+    Component(foodApp, "Application.Food", "Handlers", "Search, upsert, barcode resolve")
+    Component(trackApp, "Application.Tracking", "Handlers", "Profile, Target cache, diary snapshot, NL parse")
+    Component(recipeApp, "Application.Recipes", "Handlers", "Parse, compute nutrition, scale, consolidate list")
+    Component(dietApp, "Application.DietGen", "Handlers + OR-Tools", "PARSE→FILTER→SELECT→VERIFY→REPAIR→EXPLAIN")
+    Component(targets, "NutritionTargets", "Domain (pure math)", "BMR→TDEE→target→macros (golden test)")
+
+    Component(ai, "Infrastructure.Ai", "MEAI IChatClient + MAF", "MealSelectAgent, parsers, explainer, NutritionAssistant")
+    Component(infra, "Infrastructure", "EF Core + Redis + outbox", "DbContexts, query filters, idempotency store, cache, outbox dispatcher")
+}
+
+Rel(spa, foodEp, "calls", "HTTPS+JWT")
+Rel(spa, trackEp, "calls", "HTTPS+JWT")
+Rel(spa, recipeEp, "calls", "HTTPS+JWT")
+Rel(spa, dietEp, "calls", "HTTPS+JWT")
+Rel(spa, meEp, "calls", "HTTPS+JWT")
+Rel(spa, assistEp, "calls", "HTTPS+JWT")
+
+Rel(foodEp, behaviors, "via")
+Rel(trackEp, behaviors, "via")
+Rel(recipeEp, behaviors, "via")
+Rel(dietEp, behaviors, "via")
+
+Rel(behaviors, foodApp, "dispatches")
+Rel(behaviors, trackApp, "dispatches")
+Rel(behaviors, recipeApp, "dispatches")
+Rel(behaviors, dietApp, "dispatches")
+Rel(assistEp, ai, "drives chatbot")
+
+Rel(trackApp, targets, "computes target")
+Rel(dietApp, targets, "target for VERIFY")
+Rel(dietApp, ai, "PARSE / SELECT / EXPLAIN")
+Rel(trackApp, ai, "NL diary parse")
+Rel(recipeApp, ai, "ingredient parse")
+Rel(ai, llm, "structured output", "HTTPS, Polly")
+
+Rel(foodApp, infra, "persist/query")
+Rel(trackApp, infra, "persist/query")
+Rel(recipeApp, infra, "persist/query")
+Rel(dietApp, infra, "persist/query")
+Rel(infra, pg, "EF Core", "TCP")
+Rel(infra, redis, "cache", "TCP")
+
+SHOW_LEGEND()
+@enduml

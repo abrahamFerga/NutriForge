@@ -1,0 +1,39 @@
+# .editorconfig -- code style enforced by `dotnet format` and the CI gate.
+# Top-most file; no parent .editorconfig is consulted above this one.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,csproj,props,targets,tf,tfvars}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+# Language conventions
+dotnet_sort_system_directives_first = true
+csharp_using_directive_placement = outside_namespace:warning
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+csharp_style_var_when_type_is_apparent = true:suggestion
+
+# Naming: interfaces start with I, async methods end with Async, etc.
+dotnet_naming_rule.interfaces_should_be_prefixed.severity = warning
+dotnet_naming_rule.interfaces_should_be_prefixed.symbols = interface_symbol
+dotnet_naming_rule.interfaces_should_be_prefixed.style = prefixed_with_i
+dotnet_naming_symbols.interface_symbol.applicable_kinds = interface
+dotnet_naming_style.prefixed_with_i.required_prefix = I
+dotnet_naming_style.prefixed_with_i.capitalization = pascal_case
+
+# Promote nullable / analyzer findings to build errors (paired with TreatWarningsAsErrors).
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.IDE0055.severity = warning

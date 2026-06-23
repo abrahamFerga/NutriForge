@@ -1,0 +1,28 @@
+@startuml c1-context
+' C4 Level 1 — System Context for NutriForge
+' Render: PlantUML with C4-PlantUML stdlib (fetched by !include URL below).
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title NutriForge — System Context (C4 L1)
+
+Person(user, "End user", "Tracks food, plans batch cooking, generates diets from plain-language desires")
+Person(admin, "Admin", "Triggers and monitors data imports")
+
+System(nutriforge, "NutriForge", "Modular-monolith API + React SPA. Owns the food/nutrient core; the LLM proposes but never decides numbers.")
+
+System_Ext(usda, "USDA FoodData Central", "Authoritative free seed for foods + portions")
+System_Ext(off, "Open Food Facts", "UPC-indexed branded foods for barcode logging")
+System_Ext(llm, "LLM provider", "Azure OpenAI (prod) / Anthropic / Ollama (dev), via MEAI IChatClient")
+System_Ext(idp, "Entra External ID", "OIDC identity provider (B2C)")
+
+Rel(user, nutriforge, "Logs food, generates plans, shops", "HTTPS")
+Rel(admin, nutriforge, "Triggers/monitors imports", "HTTPS")
+Rel(user, idp, "Authenticates", "OIDC / Auth-Code + PKCE")
+Rel(nutriforge, idp, "Validates tokens", "OIDC / JWKS")
+
+Rel(nutriforge, usda, "Imports foods (nightly worker)", "HTTPS, behind Polly")
+Rel(nutriforge, off, "Imports branded foods (nightly worker)", "HTTPS, behind Polly")
+Rel(nutriforge, llm, "Parse / SELECT / explain (structured output)", "HTTPS, behind Polly")
+
+SHOW_LEGEND()
+@enduml

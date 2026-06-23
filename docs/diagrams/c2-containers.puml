@@ -1,0 +1,38 @@
+@startuml c2-containers
+' C4 Level 2 — Containers (Aspire resource topology) for NutriForge
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title NutriForge — Containers (C4 L2)
+
+Person(user, "End user")
+System_Ext(usda, "USDA FoodData Central")
+System_Ext(off, "Open Food Facts")
+System_Ext(llm, "LLM provider", "Azure OpenAI / Anthropic / Ollama")
+System_Ext(idp, "Entra External ID", "OIDC")
+
+System_Boundary(nf, "NutriForge (composed by NutriForge.AppHost)") {
+    Container(spa, "SPA", "Vite + React + TS + shadcn/ui + Tailwind", "Search→log, plan view, chatbot slide-over. TanStack Query polls the async plan flow.")
+    Container(api, "API", "ASP.NET Core 10 minimal APIs (modular monolith)", "All bounded contexts in-process + in-process MAF agents + async plan BackgroundService")
+    Container(worker, "Import worker", ".NET Worker (hosted services)", "Nightly USDA / Open Food Facts sync; upsert by (provider, providerId)")
+    ContainerDb(pg, "Operational DB", "PostgreSQL 16 (+ pgvector later)", "Foods, recipes, diary, plans, outbox, idempotency, conversations")
+    ContainerDb(audit, "Audit DB", "PostgreSQL 16 (separate database)", "Append-only audit log, PII-redacted")
+    ContainerDb(redis, "Cache", "Redis 7", "Food-search / parse / intent cache, rate-limit counters, import lock")
+}
+
+Rel(user, spa, "Uses", "HTTPS")
+Rel(user, idp, "Authenticates", "OIDC")
+Rel(spa, api, "REST /api/v1", "HTTPS + JWT")
+Rel(api, idp, "Validates JWT", "JWKS")
+
+Rel(api, pg, "Reads/writes (EF Core, query filters, outbox)", "TCP")
+Rel(api, redis, "Caches hot reads, rate limits", "TCP")
+Rel(api, llm, "Structured-output calls (PARSE/SELECT/EXPLAIN)", "HTTPS, Polly")
+Rel(api, audit, "Append-only audit via outbox", "TCP")
+
+Rel(worker, pg, "Upserts foods/portions", "TCP")
+Rel(worker, redis, "Import lock / cache warm", "TCP")
+Rel(worker, usda, "Imports", "HTTPS, Polly")
+Rel(worker, off, "Imports", "HTTPS, Polly")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,86 @@
+<Project>
+
+  <!--
+    Directory.Packages.props : Central Package Management (CPM).
+    With ManagePackageVersionsCentrally=true, project .csproj files reference
+    packages WITHOUT a Version attribute; the single source of truth for every
+    version is the <PackageVersion> entries below.
+
+    Versions are aligned to what the .NET 10 / Aspire 13.4.x templates resolve.
+    The forward-looking entries (EF Core, MEAI/MAF, OR-Tools, FluentValidation,
+    Azure identity, Testcontainers) are not yet referenced by any project; they
+    are pinned here so each ROADMAP phase can reference them without re-deciding
+    a version. Check for newer versions (dotnet list package, outdated flag)
+    before a real release.
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Aspire 13.x hosting (AppHost) — see aspire skill">
+    <PackageVersion Include="Aspire.Hosting.AppHost" Version="13.4.6" />
+    <PackageVersion Include="Aspire.Hosting.PostgreSQL" Version="13.4.6" />
+    <PackageVersion Include="Aspire.Hosting.Redis" Version="13.4.6" />
+    <PackageVersion Include="Aspire.Hosting.Testing" Version="13.4.6" />
+  </ItemGroup>
+
+  <ItemGroup Label="Aspire client integrations (consumed by Api / ImportWorker in Phase 0+)">
+    <PackageVersion Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" Version="13.4.6" />
+    <PackageVersion Include="Aspire.StackExchange.Redis" Version="13.4.6" />
+  </ItemGroup>
+
+  <ItemGroup Label="ServiceDefaults deps (OTel + service discovery + resilience)">
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.6.0" />
+    <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.6.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.2" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="ASP.NET Core / Worker host packages">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+  </ItemGroup>
+
+  <ItemGroup Label="EF Core 10 + PostgreSQL — see entity-framework-core skill (Phase 0+)">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="AI: MEAI + MAF + Azure OpenAI — see agent-framework-csharp skill (Phase 2, 4)">
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="9.9.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.0.0" />
+    <PackageVersion Include="Azure.AI.OpenAI" Version="2.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Optimization (DietGen REPAIR — ADR-0005, Phase 4)">
+    <PackageVersion Include="Google.OrTools" Version="9.11.4210" />
+  </ItemGroup>
+
+  <ItemGroup Label="Validation (Phase 0+)">
+    <PackageVersion Include="FluentValidation" Version="11.10.0" />
+    <PackageVersion Include="FluentValidation.DependencyInjectionExtensions" Version="11.10.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Azure identity + Key Vault (Managed Identity at runtime)">
+    <PackageVersion Include="Azure.Identity" Version="1.13.1" />
+    <PackageVersion Include="Azure.Extensions.AspNetCore.Configuration.Secrets" Version="1.3.2" />
+    <PackageVersion Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.3.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing (+ Testcontainers for integration tests)">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.0.0" />
+    <PackageVersion Include="Testcontainers.Redis" Version="4.0.0" />
+  </ItemGroup>
+
+</Project>

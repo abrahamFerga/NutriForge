@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NutriForge.Api/NutriForge.Api.csproj" />
+    <Project Path="src/NutriForge.AppHost/NutriForge.AppHost.csproj" />
+    <Project Path="src/NutriForge.Application/NutriForge.Application.csproj" />
+    <Project Path="src/NutriForge.Domain/NutriForge.Domain.csproj" />
+    <Project Path="src/NutriForge.ImportWorker/NutriForge.ImportWorker.csproj" />
+    <Project Path="src/NutriForge.Infrastructure/NutriForge.Infrastructure.csproj" />
+    <Project Path="src/NutriForge.ServiceDefaults/NutriForge.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NutriForge.Application.Tests/NutriForge.Application.Tests.csproj" />
+    <Project Path="tests/NutriForge.Domain.Tests/NutriForge.Domain.Tests.csproj" />
+    <Project Path="tests/NutriForge.IntegrationTests/NutriForge.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

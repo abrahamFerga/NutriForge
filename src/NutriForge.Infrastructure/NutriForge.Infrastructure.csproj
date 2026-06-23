@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NutriForge.Application\NutriForge.Application.csproj" />
+    <ProjectReference Include="..\NutriForge.Domain\NutriForge.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

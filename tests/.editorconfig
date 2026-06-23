@@ -1,0 +1,5 @@
+# Layered onto the root .editorconfig for the tests tree only.
+[*.cs]
+# Underscored test method names (Method_State_Expectation) are intentional and
+# idiomatic in xUnit tests; don't flag them.
+dotnet_diagnostic.CA1707.severity = none
