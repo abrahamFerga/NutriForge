@@ -19,11 +19,20 @@ var auditDb = postgres.AddDatabase("auditdb");   // append-only audit, outside t
 var cache = builder.AddRedis("cache");           // search/parse/intent cache, idempotency replay, rate limits
 
 // API — every bounded context in-process (modular monolith).
-builder.AddProject<Projects.NutriForge_Api>("api")
+var api = builder.AddProject<Projects.NutriForge_Api>("api")
     .WithReference(appDb).WaitFor(appDb)
     .WithReference(auditDb).WaitFor(auditDb)
     .WithReference(cache).WaitFor(cache)
     .WithExternalHttpEndpoints();
+
+// SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
+// backend (the API's CORS policy allows this origin).
+builder.AddNpmApp("web", "../NutriForge.Web", "dev")
+    .WithReference(api).WaitFor(api)
+    .WithEnvironment("VITE_API_BASE", api.GetEndpoint("http"))
+    .WithHttpEndpoint(env: "PORT")
+    .WithExternalHttpEndpoints()
+    .PublishAsDockerFile();
 
 // Import worker — nightly USDA / Open Food Facts sync; never on a request path.
 builder.AddProject<Projects.NutriForge_ImportWorker>("import-worker")

@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: oklch(0.97 0.02 162);
+  --color-brand-300: oklch(0.84 0.13 162);
+  --color-brand-400: oklch(0.78 0.16 162);
+  --color-brand-500: oklch(0.7 0.17 162);
+  --color-brand-600: oklch(0.62 0.16 162);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: #020617; /* slate-950 */
+  color: #e2e8f0; /* slate-200 */
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Thin slate scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}

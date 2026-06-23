@@ -65,4 +65,49 @@ Every credible system here (MyFitnessPal, NutriGen, the research frameworks) end
 
 ## Status
 
-Research complete. No product code yet. The next concrete step is in [`ROADMAP.md`](ROADMAP.md): stand up the Aspire AppHost + a `Food` bounded context seeded from USDA FoodData Central, and build the calorie-tracking slice end-to-end before touching diet generation.
+**Calorie-tracking MVP is implemented and building green.** The full design chain
+([`SPEC.md`](SPEC.md) → [`PLAN.md`](PLAN.md) → [`ARCH.md`](ARCH.md) → [`DECISIONS.md`](DECISIONS.md))
+is in place, the 6-epic backlog lives on GitHub
+([issues](https://github.com/abrahamFerga/NutriForge/issues) · milestones in build order),
+and **Epics 1–3 (Foundations, Food & Nutrition Core, Calorie Tracking)** are built:
+
+- **Backend** (`src/`): .NET 10 + Aspire modular monolith — OIDC/JWT auth (with a local dev scheme),
+  RBAC (`OwnerOnly`/`AdminOnly`), per-user EF Core query-filter isolation, append-only audit in a
+  separate database via a transactional outbox, idempotency + rate-limiting + Problem Details
+  middleware, GDPR export/erasure, the verification-tiered food catalog with search, the pure
+  `NutritionTargets` math, and the daily diary with log-time snapshots.
+- **Frontend** (`src/NutriForge.Web`): Vite + React + TS + Tailwind + shadcn-style UI + TanStack
+  Query — dashboard (calorie ring, macros, weekly trend), diary (search → log), profile, and the
+  always-present NutritionAssistant slide-over.
+- **Tests** (`tests/`): the TDEE golden test, the calorie safety-floor guard, diary-snapshot
+  immutability, and per-user isolation — all green.
+
+### Solution layout
+
+```
+src/
+  NutriForge.AppHost/            Aspire orchestration (Postgres ×2, Redis, API, worker, SPA)
+  NutriForge.ServiceDefaults/    OpenTelemetry + health checks + resilience
+  NutriForge.Api/                Minimal-API endpoints grouped by bounded context
+  NutriForge.Application/        Services, DTOs, validators, context ports (Food, Tracking)
+  NutriForge.Domain/             Entities, value objects, NutritionTargets pure math
+  NutriForge.Infrastructure/     EF Core contexts, audit/outbox, Redis cache, migrations
+  NutriForge.ImportWorker/       Background host for nightly importers
+  NutriForge.Web/                React SPA
+tests/                           Domain / Application / Aspire integration tests
+```
+
+### Build & run
+
+```bash
+# build + unit tests
+dotnet build NutriForge.slnx
+dotnet test tests/NutriForge.Domain.Tests tests/NutriForge.Application.Tests
+
+# run the whole system (API + Postgres + Redis + SPA) — needs Docker + the Aspire workload
+dotnet run --project src/NutriForge.AppHost
+```
+
+In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required); the SPA sends an
+`X-Debug-Subject` header so you can click straight into the app. Next up off the backlog: Epic 4
+(barcode + natural-language logging), then the differentiators (recipes, diet generation).
