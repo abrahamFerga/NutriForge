@@ -7,6 +7,7 @@
     <Project Path="src/NutriForge.ImportWorker/NutriForge.ImportWorker.csproj" />
     <Project Path="src/NutriForge.Infrastructure/NutriForge.Infrastructure.csproj" />
     <Project Path="src/NutriForge.Infrastructure.Ai/NutriForge.Infrastructure.Ai.csproj" />
+    <Project Path="src/NutriForge.Infrastructure.OpenFoodFacts/NutriForge.Infrastructure.OpenFoodFacts.csproj" />
     <Project Path="src/NutriForge.ServiceDefaults/NutriForge.ServiceDefaults.csproj" />
   </Folder>
   <Folder Name="/tests/">

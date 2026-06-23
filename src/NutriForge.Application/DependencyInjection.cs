@@ -12,9 +12,11 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<FoodService>();
+        services.AddScoped<BarcodeService>();
         services.AddScoped<ProfileService>();
         services.AddScoped<TargetService>();
         services.AddScoped<DiaryService>();
+        services.AddScoped<DiaryParseService>();
 
         services.AddValidatorsFromAssemblyContaining<SubmitFoodRequestValidator>(ServiceLifetime.Singleton);
 

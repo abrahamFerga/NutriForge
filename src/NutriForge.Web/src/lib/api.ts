@@ -3,9 +3,11 @@ import type {
   CreateFoodRequest,
   DiaryDay,
   DiaryEntry,
+  DiaryParseResult,
   FoodDetail,
   FoodSummary,
   LogProposal,
+  MealSlot,
   ProfileDto,
   TargetsDto,
   TrendPoint,
@@ -133,6 +135,17 @@ export const foodsApi = {
   create(body: CreateFoodRequest): Promise<FoodDetail> {
     return request<FoodDetail>("/api/v1/foods", { method: "POST", body });
   },
+  /** Looks up a food by GTIN/barcode. Returns null when not found (404). */
+  async barcode(gtin: string): Promise<FoodDetail | null> {
+    try {
+      return await request<FoodDetail>(
+        `/api/v1/foods/barcode/${encodeURIComponent(gtin)}`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
 };
 
 // ---- Profile ----
@@ -182,6 +195,21 @@ export const diaryApi = {
   },
   trend(days = 7): Promise<TrendPoint[]> {
     return request<TrendPoint[]>(`/api/v1/diary/trend?days=${days}`);
+  },
+  /**
+   * Parses a natural-language meal description into confirmable candidates.
+   * Throws {@link ApiError} with status 503 when no LLM provider is configured,
+   * and 400 on empty/too-long text.
+   */
+  parse(
+    text: string,
+    mealSlot?: MealSlot,
+    date?: string,
+  ): Promise<DiaryParseResult> {
+    return request<DiaryParseResult>("/api/v1/diary/parse", {
+      method: "POST",
+      body: { text, mealSlot, date },
+    });
   },
 };
 

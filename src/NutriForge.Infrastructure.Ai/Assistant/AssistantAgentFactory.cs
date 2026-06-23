@@ -17,6 +17,9 @@ public interface IAssistantAgentFactory
 
     /// <summary>Create the agent bound to this request's (owner-scoped) tools.</summary>
     AIAgent CreateAgent(IList<AITool> tools);
+
+    /// <summary>Create a tool-less agent for single-shot structured-output calls (e.g. NL parsing).</summary>
+    AIAgent CreateBareAgent(string instructions);
 }
 
 /// <summary>
@@ -64,6 +67,16 @@ public sealed class AssistantAgentFactory : IAssistantAgentFactory
         }
 
         return _chatClient.AsAIAgent(instructions: SystemPrompt, name: "NutritionAssistant", tools: tools);
+    }
+
+    public AIAgent CreateBareAgent(string instructions)
+    {
+        if (_chatClient is null)
+        {
+            throw new InvalidOperationException("The assistant provider is not configured (set the 'Ai' options).");
+        }
+
+        return _chatClient.AsAIAgent(instructions: instructions, name: "NutriForgeParser");
     }
 
     private static ChatClient? Build(AiOptions o)

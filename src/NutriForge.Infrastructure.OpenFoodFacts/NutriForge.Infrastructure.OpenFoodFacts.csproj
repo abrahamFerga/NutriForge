@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NutriForge.Application\NutriForge.Application.csproj" />
+    <ProjectReference Include="..\NutriForge.Domain\NutriForge.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

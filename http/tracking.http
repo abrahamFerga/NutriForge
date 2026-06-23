@@ -54,5 +54,16 @@ X-Debug-Subject: {{subject}}
 GET {{host}}/api/v1/diary/trend?days=7
 X-Debug-Subject: {{subject}}
 
+### Natural-language logging → confirmable candidates (needs an LLM provider; else 503)
+POST {{host}}/api/v1/diary/parse
+X-Debug-Subject: {{subject}}
+Content-Type: application/json
+
+{ "text": "2 eggs and a banana", "mealSlot": "Breakfast" }
+
+### Barcode lookup (fetch-on-miss from Open Food Facts; seeded GTIN works offline)
+GET {{host}}/api/v1/foods/barcode/5449000000996
+X-Debug-Subject: {{subject}}
+
 ### Anonymous call (no subject header) → expect 401
 GET {{host}}/api/v1/targets

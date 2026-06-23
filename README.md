@@ -130,5 +130,8 @@ endpoint by hand.
 
 In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required): send
 `X-Debug-Subject` to act as a user, `X-Debug-Role` to pick `user`/`admin`; **no subject header ⇒
-anonymous**. Next up off the backlog: Epic 4 (barcode + natural-language logging — the first epic
-that needs an LLM key), then the differentiators (recipes, diet generation).
+anonymous**. **Epic 4 (low-friction logging) is built**: barcode lookup with Open Food Facts
+fetch-on-miss (`GET /api/v1/foods/barcode/{gtin}`) and natural-language entry
+(`POST /api/v1/diary/parse` — "2 eggs and toast" → confirmable candidates; the LLM only parses,
+deterministic code owns the numbers; needs `OPENAI_API_KEY`). Next: the differentiators — Epic 5
+(recipes & batch cooking) and Epic 6 (diet generation).

@@ -7,6 +7,7 @@ using NutriForge.Application;
 using NutriForge.Application.Abstractions;
 using NutriForge.Infrastructure;
 using NutriForge.Infrastructure.Ai;
+using NutriForge.Infrastructure.OpenFoodFacts;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +19,9 @@ builder.AddInfrastructure();
 
 // The agentic layer: MAF NutritionAssistant (provider-swappable; unconfigured ⇒ 503).
 builder.AddAiAssistant();
+
+// Open Food Facts connector — barcode fetch-on-miss for low-friction logging.
+builder.Services.AddOpenFoodFacts();
 
 // The request-scoped authenticated principal (overrides the worker's system principal).
 builder.Services.AddHttpContextAccessor();

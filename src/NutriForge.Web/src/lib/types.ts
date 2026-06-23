@@ -172,6 +172,33 @@ export interface TrendPoint {
   targetKcal: number;
 }
 
+// ---- Natural-language parse ----
+
+/**
+ * A single resolved food candidate returned by the natural-language parser.
+ * The five fields { date, mealSlot, foodId, portionId, quantity } map straight
+ * onto {@link CreateDiaryEntryRequest}.
+ */
+export interface ParseCandidate {
+  date: string; // yyyy-MM-dd
+  mealSlot: string;
+  foodId: string;
+  foodName: string;
+  portionId: string | null;
+  portionName: string;
+  quantity: number;
+  grams: number;
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+}
+
+export interface DiaryParseResult {
+  candidates: ParseCandidate[];
+  unresolved: string[];
+}
+
 // ---- Assistant ----
 
 /**

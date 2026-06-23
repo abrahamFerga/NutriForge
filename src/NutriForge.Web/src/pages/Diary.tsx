@@ -1,6 +1,15 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus, Search, Trash2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Barcode,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,19 +18,25 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, LoadingState } from "@/components/StateMessage";
 import {
-  useAddDiaryEntry,
   useDebounced,
   useDeleteDiaryEntry,
   useDiary,
 } from "@/hooks/useQueries";
-import { foodsApi } from "@/lib/api";
+import { ApiError, diaryApi, foodsApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
-import { MEAL_SLOTS, type FoodSummary, type MealSlot } from "@/lib/types";
+import {
+  MEAL_SLOTS,
+  type DiaryParseResult,
+  type FoodDetail,
+  type FoodSummary,
+  type MealSlot,
+  type ParseCandidate,
+} from "@/lib/types";
 import { cn, round, toIsoDate, today } from "@/lib/utils";
 
 export function Diary() {
   const [date, setDate] = useState<string>(today());
-  const [selectedFood, setSelectedFood] = useState<FoodSummary | null>(null);
+  const [mealSlot, setMealSlot] = useState<MealSlot>("Breakfast");
 
   const diary = useDiary(date);
   const deleteEntry = useDeleteDiaryEntry(date);
@@ -56,13 +71,12 @@ export function Diary() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
-        {/* Search + log */}
+        {/* Add food: Search | Describe | Barcode */}
         <div className="lg:col-span-2">
-          <FoodSearch
-            onPick={setSelectedFood}
-            selectedFood={selectedFood}
+          <AddFood
             date={date}
-            onLogged={() => setSelectedFood(null)}
+            mealSlot={mealSlot}
+            onMealSlotChange={setMealSlot}
           />
         </div>
 
@@ -87,19 +101,110 @@ export function Diary() {
   );
 }
 
-// -------------------- Food search + log form --------------------
+// -------------------- Add food (tabbed) --------------------
 
-function FoodSearch({
-  onPick,
-  selectedFood,
+type AddTab = "search" | "describe" | "barcode";
+
+const TABS: { id: AddTab; label: string; icon: typeof Search }[] = [
+  { id: "search", label: "Search", icon: Search },
+  { id: "describe", label: "Describe", icon: Sparkles },
+  { id: "barcode", label: "Barcode", icon: Barcode },
+];
+
+/**
+ * Shared logging mutation used by every tab. Invalidates the day diary plus
+ * the day-independent `diaryAll` and `targets` keys after each successful log.
+ */
+function useLogEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      date: string;
+      mealSlot: string;
+      foodId: string;
+      portionId: string | null;
+      quantity: number;
+    }) =>
+      diaryApi.create({
+        date: body.date,
+        mealSlot: body.mealSlot as MealSlot,
+        foodId: body.foodId,
+        portionId: body.portionId,
+        quantity: body.quantity,
+      }),
+    onSuccess: (entry) => {
+      qc.invalidateQueries({ queryKey: queryKeys.diary(entry.date) });
+      qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+    },
+  });
+}
+
+function AddFood({
   date,
-  onLogged,
+  mealSlot,
+  onMealSlotChange,
 }: {
-  onPick: (food: FoodSummary | null) => void;
-  selectedFood: FoodSummary | null;
   date: string;
-  onLogged: () => void;
+  mealSlot: MealSlot;
+  onMealSlotChange: (slot: MealSlot) => void;
 }) {
+  const [tab, setTab] = useState<AddTab>("search");
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Add food</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div
+          role="tablist"
+          aria-label="Add food method"
+          className="grid grid-cols-3 gap-1 rounded-lg border border-slate-800 bg-slate-950/40 p-1"
+        >
+          {TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={cn(
+                "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+                tab === id
+                  ? "bg-slate-800 text-slate-100"
+                  : "text-slate-400 hover:text-slate-200",
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "search" ? (
+          <SearchTab date={date} />
+        ) : tab === "describe" ? (
+          <DescribeTab
+            date={date}
+            mealSlot={mealSlot}
+            onMealSlotChange={onMealSlotChange}
+          />
+        ) : (
+          <BarcodeTab
+            date={date}
+            mealSlot={mealSlot}
+            onMealSlotChange={onMealSlotChange}
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// -------------------- Search tab --------------------
+
+function SearchTab({ date }: { date: string }) {
+  const [selectedFood, setSelectedFood] = useState<FoodSummary | null>(null);
   const [term, setTerm] = useState("");
   const debounced = useDebounced(term, 350);
   const enabled = debounced.trim().length >= 2;
@@ -111,39 +216,35 @@ function FoodSearch({
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Add food</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-500" />
-          <Input
-            value={term}
-            onChange={(e) => setTerm(e.target.value)}
-            placeholder="Search foods…"
-            className="pl-9"
-          />
-        </div>
+    <div className="space-y-3">
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-500" />
+        <Input
+          value={term}
+          onChange={(e) => setTerm(e.target.value)}
+          placeholder="Search foods…"
+          className="pl-9"
+          aria-label="Search foods"
+        />
+      </div>
 
-        {selectedFood ? (
-          <LogForm
-            food={selectedFood}
-            date={date}
-            onCancel={() => onPick(null)}
-            onLogged={onLogged}
-          />
-        ) : (
-          <SearchResults
-            enabled={enabled}
-            loading={search.isLoading && enabled}
-            error={search.error}
-            results={search.data}
-            onPick={onPick}
-          />
-        )}
-      </CardContent>
-    </Card>
+      {selectedFood ? (
+        <LogForm
+          food={selectedFood}
+          date={date}
+          onCancel={() => setSelectedFood(null)}
+          onLogged={() => setSelectedFood(null)}
+        />
+      ) : (
+        <SearchResults
+          enabled={enabled}
+          loading={search.isLoading && enabled}
+          error={search.error}
+          results={search.data}
+          onPick={setSelectedFood}
+        />
+      )}
+    </div>
   );
 }
 
@@ -229,20 +330,294 @@ function VerificationTag({ status }: { status: string }) {
   );
 }
 
+function MealSlotSelect({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: MealSlot;
+  onChange: (slot: MealSlot) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id}>Meal</Label>
+      <Select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value as MealSlot)}
+      >
+        {MEAL_SLOTS.map((slot) => (
+          <option key={slot} value={slot}>
+            {slot}
+          </option>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
+// -------------------- Describe (natural-language) tab --------------------
+
+function DescribeTab({
+  date,
+  mealSlot,
+  onMealSlotChange,
+}: {
+  date: string;
+  mealSlot: MealSlot;
+  onMealSlotChange: (slot: MealSlot) => void;
+}) {
+  const [text, setText] = useState("");
+  // Tracks which candidate rows have been logged, keyed by index.
+  const [logged, setLogged] = useState<Record<number, boolean>>({});
+
+  const parse = useMutation<DiaryParseResult, unknown, void>({
+    mutationFn: () => diaryApi.parse(text.trim(), mealSlot, date),
+    onSuccess: () => setLogged({}),
+  });
+
+  const noProvider =
+    parse.error instanceof ApiError && parse.error.status === 503;
+
+  function submit() {
+    if (text.trim().length === 0) return;
+    parse.mutate();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label htmlFor="nl-text">Describe your meal</Label>
+        <textarea
+          id="nl-text"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="e.g. '2 eggs and toast'"
+          rows={3}
+          className="flex w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30 focus-visible:outline-none"
+        />
+      </div>
+
+      <MealSlotSelect id="nl-meal" value={mealSlot} onChange={onMealSlotChange} />
+
+      <Button
+        onClick={submit}
+        disabled={parse.isPending || text.trim().length === 0}
+        className="w-full"
+      >
+        {parse.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+        Parse
+      </Button>
+
+      {noProvider ? (
+        <p className="rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+          Natural-language logging needs an LLM provider — set OPENAI_API_KEY.
+        </p>
+      ) : parse.isError ? (
+        <ErrorState error={parse.error} />
+      ) : null}
+
+      {parse.data ? (
+        <ParseResults
+          result={parse.data}
+          logged={logged}
+          onLogged={(i) => setLogged((prev) => ({ ...prev, [i]: true }))}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ParseResults({
+  result,
+  logged,
+  onLogged,
+}: {
+  result: DiaryParseResult;
+  logged: Record<number, boolean>;
+  onLogged: (index: number) => void;
+}) {
+  const { candidates, unresolved } = result;
+
+  if (candidates.length === 0 && unresolved.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-slate-500">
+        Nothing found in that description.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {candidates.length > 0 ? (
+        <ul className="divide-y divide-slate-800 overflow-hidden rounded-lg border border-slate-800">
+          {candidates.map((candidate, i) => (
+            <li key={`${candidate.foodId}-${i}`}>
+              <CandidateRow
+                candidate={candidate}
+                logged={logged[i] ?? false}
+                onLogged={() => onLogged(i)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {unresolved.length > 0 ? (
+        <p className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
+          Couldn&apos;t find: {unresolved.join(", ")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function CandidateRow({
+  candidate,
+  logged,
+  onLogged,
+}: {
+  candidate: ParseCandidate;
+  logged: boolean;
+  onLogged: () => void;
+}) {
+  const log = useLogEntry();
+
+  function submit() {
+    log.mutate(
+      {
+        date: candidate.date,
+        mealSlot: candidate.mealSlot,
+        foodId: candidate.foodId,
+        portionId: candidate.portionId,
+        quantity: candidate.quantity,
+      },
+      { onSuccess: onLogged },
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-slate-100">
+          {round(candidate.quantity, 2)} {candidate.portionName} ·{" "}
+          {round(candidate.kcal)} kcal
+        </p>
+        <p className="truncate text-xs text-slate-500">
+          {candidate.foodName}
+          <span className="mx-1.5 text-slate-700">·</span>
+          {candidate.mealSlot}
+        </p>
+      </div>
+      {logged ? (
+        <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-emerald-300">
+          <Check className="h-4 w-4" />
+          Logged
+        </span>
+      ) : (
+        <Button
+          size="sm"
+          onClick={submit}
+          disabled={log.isPending}
+          className="shrink-0"
+        >
+          {log.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
+          Log
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// -------------------- Barcode tab --------------------
+
+function BarcodeTab({
+  date,
+  mealSlot,
+  onMealSlotChange,
+}: {
+  date: string;
+  mealSlot: MealSlot;
+  onMealSlotChange: (slot: MealSlot) => void;
+}) {
+  const [gtin, setGtin] = useState("");
+
+  const lookup = useMutation<FoodDetail | null, unknown, void>({
+    mutationFn: () => foodsApi.barcode(gtin.trim()),
+  });
+
+  function submit() {
+    if (gtin.trim().length === 0) return;
+    lookup.mutate();
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label htmlFor="gtin">Barcode (GTIN)</Label>
+        <Input
+          id="gtin"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={gtin}
+          onChange={(e) => setGtin(e.target.value.replace(/[^0-9]/g, ""))}
+          placeholder="e.g. 5000159484695"
+        />
+      </div>
+
+      <Button
+        onClick={submit}
+        disabled={lookup.isPending || gtin.trim().length === 0}
+        className="w-full"
+      >
+        {lookup.isPending ? <Spinner /> : <Barcode className="h-4 w-4" />}
+        Look up
+      </Button>
+
+      {lookup.isError ? <ErrorState error={lookup.error} /> : null}
+
+      {lookup.isSuccess ? (
+        lookup.data ? (
+          <LogForm
+            food={lookup.data}
+            date={date}
+            mealSlot={mealSlot}
+            onMealSlotChange={onMealSlotChange}
+            onCancel={() => lookup.reset()}
+            onLogged={() => lookup.reset()}
+          />
+        ) : (
+          <p className="py-4 text-center text-sm text-slate-500">
+            No product found for that barcode.
+          </p>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 const GRAMS_OPTION = "__grams__";
 
 function LogForm({
   food,
   date,
+  mealSlot: controlledMealSlot,
+  onMealSlotChange,
   onCancel,
   onLogged,
 }: {
   food: FoodSummary;
   date: string;
+  mealSlot?: MealSlot;
+  onMealSlotChange?: (slot: MealSlot) => void;
   onCancel: () => void;
   onLogged: () => void;
 }) {
-  const [mealSlot, setMealSlot] = useState<MealSlot>("Breakfast");
+  // Use controlled meal-slot when provided (barcode tab), else local state.
+  const [localMealSlot, setLocalMealSlot] = useState<MealSlot>("Breakfast");
+  const mealSlot = controlledMealSlot ?? localMealSlot;
+  const setMealSlot = onMealSlotChange ?? setLocalMealSlot;
   const [portionId, setPortionId] = useState<string>(
     food.portions[0]?.id ?? GRAMS_OPTION,
   );
@@ -250,7 +625,7 @@ function LogForm({
     food.portions.length > 0 ? "1" : "100",
   );
 
-  const add = useAddDiaryEntry();
+  const add = useLogEntry();
   const isGrams = portionId === GRAMS_OPTION;
 
   const grams = useMemo(() => {
@@ -287,20 +662,7 @@ function LogForm({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label htmlFor="meal">Meal</Label>
-          <Select
-            id="meal"
-            value={mealSlot}
-            onChange={(e) => setMealSlot(e.target.value as MealSlot)}
-          >
-            {MEAL_SLOTS.map((slot) => (
-              <option key={slot} value={slot}>
-                {slot}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <MealSlotSelect id="meal" value={mealSlot} onChange={setMealSlot} />
         <div className="space-y-1">
           <Label htmlFor="portion">Portion</Label>
           <Select

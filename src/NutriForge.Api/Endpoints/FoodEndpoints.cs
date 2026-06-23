@@ -24,8 +24,9 @@ public static class FoodEndpoints
             await foods.GetAsync(id, ct) is { } food ? Results.Ok(food) : Results.NotFound())
             .WithName("GetFood");
 
-        group.MapGet("/barcode/{gtin}", async (string gtin, FoodService foods, CancellationToken ct) =>
-            await foods.GetByBarcodeAsync(gtin, ct) is { } food ? Results.Ok(food) : Results.NotFound())
+        // Barcode lookup with fetch-on-miss from Open Food Facts (then cached in the catalog).
+        group.MapGet("/barcode/{gtin}", async (string gtin, BarcodeService barcode, CancellationToken ct) =>
+            await barcode.LookupAsync(gtin, ct) is { } food ? Results.Ok(food) : Results.NotFound())
             .WithName("GetFoodByBarcode");
 
         group.MapPost("/", async (SubmitFoodRequest req, FoodService foods, CancellationToken ct) =>

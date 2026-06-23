@@ -38,6 +38,13 @@ public static class DevDataSeeder
             Food("Greek yogurt, plain, nonfat", "Generic", VerificationStatus.Community, 59, 10.2, 0.4, 3.6,
                 ("1 container", 170)));
 
+        // A couple of barcoded foods so barcode logging works offline (real GTINs fetch from OFF).
+        var cola = Food("Cola soft drink", "Generic", VerificationStatus.Community, 42, 0, 0, 10.6, ("1 can (330 ml)", 330));
+        cola.Gtin = "5449000000996";
+        var proteinBar = Food("Protein bar, chocolate", "Generic", VerificationStatus.Community, 350, 30, 12, 35, ("1 bar (60 g)", 60));
+        proteinBar.Gtin = "0000000000017";
+        db.Foods.AddRange(cola, proteinBar);
+
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 

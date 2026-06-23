@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\NutriForge.Application\NutriForge.Application.csproj" />
     <ProjectReference Include="..\..\src\NutriForge.Infrastructure\NutriForge.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\NutriForge.Infrastructure.Ai\NutriForge.Infrastructure.Ai.csproj" />
+    <ProjectReference Include="..\..\src\NutriForge.Infrastructure.OpenFoodFacts\NutriForge.Infrastructure.OpenFoodFacts.csproj" />
   </ItemGroup>
 
 </Project>

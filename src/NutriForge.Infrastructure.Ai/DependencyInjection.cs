@@ -18,6 +18,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<LogProposalHolder>();
         builder.Services.AddScoped<AssistantTools>();
         builder.Services.AddScoped<NutritionAssistantService>();
+        builder.Services.AddScoped<NutriForge.Application.Abstractions.INlDiaryParser, Assistant.NlDiaryParser>();
 
         return builder;
     }
