@@ -25,27 +25,50 @@ var api = builder.AddProject<Projects.NutriForge_Api>("api")
     .WithReference(cache).WaitFor(cache)
     .WithExternalHttpEndpoints();
 
-// Light up the MAF NutritionAssistant when an OpenAI key is present in the environment
-// (`export OPENAI_API_KEY=sk-...` before `dotnet run`). No secret lives in source — it's read
-// from the env and forwarded to the API's `Ai` config. Otherwise the assistant reports 503.
-if (Environment.GetEnvironmentVariable("OPENAI_API_KEY") is { Length: > 0 } openAiKey)
+// Integration tests run the AppHost headless: no SPA, and the NutritionAssistant deliberately
+// unconfigured so they can assert its 503 graceful-degradation path. They signal this via
+// SKIP_NPM_APPS, which therefore also exempts them from the OpenAI-key requirement below.
+var underTest = string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase);
+
+// The MAF NutritionAssistant is a core capability, not an optional add-on: a real run MUST be
+// configured with an OpenAI key. Express that the Aspire way — a first-class secret *parameter* —
+// instead of hand-throwing. An unresolved parameter is surfaced by Aspire with a clear, masked
+// "set a value for openai-api-key" diagnostic and keeps the API from starting, so the key is
+// genuinely required for every run. Provide it via (in order of precedence):
+//   • user-secrets:  dotnet user-secrets set Parameters:openai-api-key "sk-..."  (recommended)
+//   • the OPENAI_API_KEY env var (bridged below, so existing scripts keep working)
+//   • the Aspire dashboard's "set parameter value" prompt
+if (!underTest)
 {
+    if (Environment.GetEnvironmentVariable("OPENAI_API_KEY") is { Length: > 0 } envKey)
+    {
+        builder.Configuration["Parameters:openai-api-key"] = envKey;
+    }
+
+    var openAiKey = builder.AddParameter("openai-api-key", secret: true);
+
     api.WithEnvironment("Ai__Provider", "OpenAI")
         .WithEnvironment("Ai__Model", Environment.GetEnvironmentVariable("OPENAI_CHAT_MODEL_NAME") ?? "gpt-4o-mini")
         .WithEnvironment("Ai__ApiKey", openAiKey);
 }
 
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
-// backend (the API's CORS policy allows this origin). Skipped under integration tests
-// (SKIP_NPM_APPS=true) so they don't boot the Node dev server.
-if (!string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase))
+// backend. Skipped under integration tests (SKIP_NPM_APPS=true) so they don't boot the Node dev
+// server.
+if (!underTest)
 {
-    builder.AddNpmApp("web", "../NutriForge.Web", "dev")
+    var web = builder.AddNpmApp("web", "../NutriForge.Web", "dev")
         .WithReference(api).WaitFor(api)
         .WithEnvironment("VITE_API_BASE", api.GetEndpoint("http"))
         .WithHttpEndpoint(env: "PORT")
         .WithExternalHttpEndpoints()
         .PublishAsDockerFile();
+
+    // Tell the API the browser-facing SPA origin so its CORS allow-list matches. Aspire assigns
+    // the Vite endpoint a dynamic port, so a hard-coded `http://localhost:5173` would never match
+    // and every cross-origin request would fail with "Failed to fetch". This is an env injection,
+    // not a WaitFor, so it introduces no startup cycle (the API does not wait on the SPA).
+    api.WithEnvironment("Cors__SpaOrigin", web.GetEndpoint("http"));
 }
 
 // Import worker — nightly USDA / Open Food Facts sync; never on a request path.

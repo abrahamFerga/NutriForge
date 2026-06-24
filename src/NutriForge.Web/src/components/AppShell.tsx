@@ -56,38 +56,37 @@ export function AppShell() {
       {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
-        {/* Mobile nav */}
-        <nav className="flex gap-1 border-b border-slate-800 bg-slate-900/40 px-3 py-2 md:hidden">
-          {NAV.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                cn(
-                  "flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium",
-                  isActive
-                    ? "bg-brand-500/15 text-brand-300"
-                    : "text-slate-400 hover:text-slate-100",
-                )
-              }
-            >
-              <Icon className="h-5 w-5" />
-              {label}
-            </NavLink>
-          ))}
-        </nav>
-
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        {/* Extra bottom padding on mobile leaves room for the fixed bottom tab bar + FAB. */}
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-6 md:pb-8 lg:px-8">
           <Outlet />
         </main>
       </div>
 
-      {/* Floating assistant button — present on every route */}
+      {/* Mobile bottom tab bar — thumb-reachable primary navigation. */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-slate-800 bg-slate-950/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+        {NAV.map(({ to, label, icon: Icon, end }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            className={({ isActive }) =>
+              cn(
+                "flex flex-1 flex-col items-center gap-1 px-1 py-2 text-[0.65rem] font-medium transition-colors",
+                isActive ? "text-brand-300" : "text-slate-400 hover:text-slate-100",
+              )
+            }
+          >
+            <Icon className="h-5 w-5 shrink-0" />
+            <span className="max-w-full truncate">{label}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Floating assistant button — present on every route. Sits above the bottom tab bar on mobile. */}
       <button
         onClick={() => setAssistantOpen(true)}
         aria-label="Open NutritionAssistant"
-        className="fixed right-5 bottom-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-slate-950 shadow-lg shadow-brand-500/30 transition-transform hover:scale-105 hover:bg-brand-400"
+        className="fixed right-5 bottom-20 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-500 text-slate-950 shadow-lg shadow-brand-500/30 transition-transform hover:scale-105 hover:bg-brand-400 md:bottom-5"
       >
         <MessageCircle className="h-6 w-6" />
       </button>

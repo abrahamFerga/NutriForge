@@ -109,13 +109,17 @@ tests/                           Domain / Application / Aspire integration tests
 # build everything
 dotnet build NutriForge.slnx
 
+# REQUIRED before running: the NutritionAssistant is a core capability, so the API won't
+# start until the `openai-api-key` Aspire parameter has a value. Set it once (recommended):
+dotnet user-secrets --project src/NutriForge.AppHost set Parameters:openai-api-key "sk-..."
+#   …or export OPENAI_API_KEY=sk-...   (bridged to the parameter; PowerShell: $env:OPENAI_API_KEY="sk-...")
+#   …or leave it unset and let the Aspire dashboard prompt you for the value on first run.
+#   (optional) export OPENAI_CHAT_MODEL_NAME=gpt-4o-mini   # default model
+
 # run the whole system (API + Postgres + Redis + SPA) — needs Docker running
 ./scripts/run-and-wait.ps1          # or: dotnet run --project src/NutriForge.AppHost
 #   → open the Aspire dashboard URL it prints; the SPA + API resources are listed there.
-
-# enable the live NutritionAssistant (one env var; the AppHost forwards it to the API):
-#   export OPENAI_API_KEY=sk-...     # then run the AppHost — the chatbot panel goes live.
-#   (Unset ⇒ the assistant reports 503 by design; everything else works without a key.)
+#   (Integration tests are exempt from the key requirement — they assert the assistant's 503 path.)
 
 # tests: 12/12 green. Integration tests boot the real AppHost (Postgres + Redis) via Docker.
 dotnet test NutriForge.slnx

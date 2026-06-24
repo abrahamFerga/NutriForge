@@ -9,6 +9,9 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
       ref={ref}
       className={cn(
         "h-10 w-full appearance-none rounded-lg border border-slate-700 bg-slate-950/60 px-3 text-sm text-slate-100",
+        // Render the native option popup in dark mode so it isn't unreadable light-on-light;
+        // also set the option colors explicitly for browsers (Chrome/Edge on Windows) that honor them.
+        "[color-scheme:dark] [&>option]:bg-slate-900 [&>option]:text-slate-100",
         "focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:outline-none",
         "disabled:cursor-not-allowed disabled:opacity-50",
         // chevron

@@ -216,7 +216,7 @@ function RecipeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                   <CardTitle>Ingredients</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-hidden rounded-lg border border-slate-800">
+                  <div className="overflow-x-auto rounded-lg border border-slate-800">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="text-xs text-slate-500">

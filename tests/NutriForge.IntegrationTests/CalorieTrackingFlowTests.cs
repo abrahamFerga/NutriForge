@@ -192,4 +192,178 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         var list = await slRes.Content.ReadFromJsonAsync<JsonElement>(Json);
         Assert.True(list.GetProperty("aisles").GetArrayLength() > 0, "the shopping list groups items by aisle");
     }
+
+    [Fact]
+    public async Task Concurrent_first_requests_for_a_new_subject_do_not_500_on_the_provisioning_race()
+    {
+        // Make sure the app is serving first (this provisions a *different*, warm-up subject).
+        await fixture.CreateReadyClientAsync(subject: $"warmup-{Guid.NewGuid():N}");
+
+        // A brand-new subject that has never been provisioned. Build the client directly so the
+        // burst below is its very first contact with the API — exactly what a browser does when it
+        // fires several calls in parallel on page load. Pre-fix, the losers of the insert race hit
+        // the unique OidcSubject constraint (Postgres 23505) and returned 500.
+        var subject = $"race-{Guid.NewGuid():N}";
+
+        // Each request gets its OWN client → its own connection. A single shared client would put
+        // every request on one multiplexed HTTP/2 connection, letting the first request commit
+        // provisioning before the others even reach the server — hiding the race. Separate
+        // connections, released together, make the check-then-insert window observable.
+        const int Burst = 24;
+        var clients = Enumerable.Range(0, Burst).Select(_ =>
+        {
+            var c = fixture.App.CreateHttpClient("api");
+            c.Timeout = TimeSpan.FromSeconds(100);
+            c.DefaultRequestHeaders.Add("X-Debug-Subject", subject);
+            c.DefaultRequestHeaders.Add("X-Debug-Role", "user");
+            return c;
+        }).ToArray();
+
+        try
+        {
+            var start = new TaskCompletionSource();
+            var tasks = clients.Select(async c =>
+            {
+                await start.Task;
+                return await c.GetAsync("/api/v1/me/export");
+            }).ToArray();
+            start.SetResult();
+            var responses = await Task.WhenAll(tasks);
+
+            try
+            {
+                // Pre-fix, the losers of the insert race returned 500 (Postgres 23505).
+                Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+            }
+            finally
+            {
+                foreach (var r in responses)
+                {
+                    r.Dispose();
+                }
+            }
+
+            // The race converged to a single, stable identity: repeated reads return the same row.
+            var first = (await clients[0].GetFromJsonAsync<JsonElement>("/api/v1/me/export", Json)).GetProperty("user").GetRawText();
+            var second = (await clients[0].GetFromJsonAsync<JsonElement>("/api/v1/me/export", Json)).GetProperty("user").GetRawText();
+            Assert.Equal(first, second);
+        }
+        finally
+        {
+            foreach (var c in clients)
+            {
+                c.Dispose();
+            }
+        }
+    }
+
+    // -------------------- Multi-person batch cooking (Eaters multiplier) --------------------
+
+    /// <summary>The load-bearing invariant: cooking for N people must NOT change the per-eater plan.</summary>
+    [Fact]
+    public async Task Eaters_multiplier_does_not_leak_into_the_per_eater_plan()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"eaters-inv-{Guid.NewGuid():N}");
+        var one = await CreateReadyPlanAsync(client, eaters: 1);
+        var two = await CreateReadyPlanAsync(client, eaters: 2);
+
+        Assert.Equal(1, one.GetProperty("eaters").GetInt32());
+        Assert.Equal(2, two.GetProperty("eaters").GetInt32());
+
+        // Target + achieved daily averages are per-eater and must be identical regardless of headcount.
+        Assert.Equal(one.GetProperty("targetKcal").GetDouble(), two.GetProperty("targetKcal").GetDouble());
+        Assert.Equal(one.GetProperty("achievedKcal").GetDouble(), two.GetProperty("achievedKcal").GetDouble());
+        Assert.Equal(one.GetProperty("achievedProteinG").GetDouble(), two.GetProperty("achievedProteinG").GetDouble());
+        Assert.Equal(one.GetProperty("achievedFatG").GetDouble(), two.GetProperty("achievedFatG").GetDouble());
+        Assert.Equal(one.GetProperty("achievedCarbG").GetDouble(), two.GetProperty("achievedCarbG").GetDouble());
+
+        // Every slot's per-eater servings + macros are identical too (generation never saw Eaters).
+        var s1 = one.GetProperty("slots");
+        var s2 = two.GetProperty("slots");
+        Assert.Equal(s1.GetArrayLength(), s2.GetArrayLength());
+        for (var i = 0; i < s1.GetArrayLength(); i++)
+        {
+            Assert.Equal(s1[i].GetProperty("servings").GetDouble(), s2[i].GetProperty("servings").GetDouble());
+            Assert.Equal(s1[i].GetProperty("kcal").GetDouble(), s2[i].GetProperty("kcal").GetDouble());
+        }
+    }
+
+    /// <summary>Eaters=2 buys exactly 2x the groceries (fresh subject ⇒ empty pantry, no subtraction).</summary>
+    [Fact]
+    public async Task Eaters_scales_the_shopping_list_by_the_people_count()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"eaters-shop-{Guid.NewGuid():N}");
+        var one = await CreateReadyPlanAsync(client, eaters: 1);
+        var two = await CreateReadyPlanAsync(client, eaters: 2);
+
+        var gramsOne = await ShoppingGramsTotalAsync(client, one.GetProperty("id").GetString()!);
+        var gramsTwo = await ShoppingGramsTotalAsync(client, two.GetProperty("id").GetString()!);
+
+        Assert.True(gramsOne > 0, "expected a non-empty shopping list");
+        Assert.InRange(gramsTwo / gramsOne, 1.98, 2.02); // 2 people ⇒ ~2x groceries (pantry empty)
+    }
+
+    /// <summary>Omitted/zero eaters clamps to 1 (back-compat); a real value round-trips.</summary>
+    [Fact]
+    public async Task Eaters_defaults_and_clamps_and_round_trips()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"eaters-clamp-{Guid.NewGuid():N}");
+
+        var omitted = await CreateReadyPlanAsync(client, eaters: null);
+        Assert.Equal(1, omitted.GetProperty("eaters").GetInt32());
+
+        var zero = await CreateReadyPlanAsync(client, eaters: 0);
+        Assert.Equal(1, zero.GetProperty("eaters").GetInt32());
+
+        var two = await CreateReadyPlanAsync(client, eaters: 2);
+        Assert.Equal(2, two.GetProperty("eaters").GetInt32());
+    }
+
+    /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>
+    private static async Task<JsonElement> CreateReadyPlanAsync(HttpClient client, int? eaters, int days = 3)
+    {
+        object body = eaters is null
+            ? new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0 }
+            : new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0, eaters };
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diet-plans")
+        {
+            Content = JsonContent.Create(body, options: Json),
+        };
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString()); // distinct creates ⇒ distinct keys
+        using var res = await client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Accepted, res.StatusCode);
+        var planId = (await res.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetString();
+
+        JsonElement plan = default;
+        var status = "Generating";
+        for (var i = 0; i < 30 && status == "Generating"; i++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            plan = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diet-plans/{planId}", Json);
+            status = plan.GetProperty("status").GetString()!;
+        }
+
+        Assert.Equal("Ready", status);
+        return plan;
+    }
+
+    private static async Task<double> ShoppingGramsTotalAsync(HttpClient client, string planId)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/diet-plans/{planId}/shopping-list");
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using var res = await client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Created, res.StatusCode);
+        var list = await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+
+        double total = 0;
+        foreach (var aisle in list.GetProperty("aisles").EnumerateArray())
+        {
+            foreach (var item in aisle.GetProperty("items").EnumerateArray())
+            {
+                total += item.GetProperty("grams").GetDouble();
+            }
+        }
+
+        return total;
+    }
 }

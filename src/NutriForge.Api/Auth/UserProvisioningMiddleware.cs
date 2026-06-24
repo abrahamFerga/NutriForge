@@ -29,7 +29,25 @@ public sealed class UserProvisioningMiddleware(RequestDelegate next)
                 {
                     user = User.FromSubject(subject, principal.FindFirstValue(ClaimTypes.Email), null);
                     db.Users.Add(user);
-                    await db.SaveChangesAsync(context.RequestAborted).ConfigureAwait(false);
+                    try
+                    {
+                        await db.SaveChangesAsync(context.RequestAborted).ConfigureAwait(false);
+                    }
+                    catch (DbUpdateException)
+                    {
+                        // A concurrent first request provisioned the same subject first (the browser
+                        // fires several API calls in parallel on load), losing the race on the unique
+                        // OidcSubject constraint. Abandon our insert and adopt the winner's row. If the
+                        // row still isn't there, this wasn't the provisioning race — surface the failure.
+                        db.Entry(user).State = EntityState.Detached;
+                        user = await db.Users.AsNoTracking()
+                            .FirstOrDefaultAsync(u => u.OidcSubject == subject, context.RequestAborted)
+                            .ConfigureAwait(false);
+                        if (user is null)
+                        {
+                            throw;
+                        }
+                    }
                 }
 
                 context.Items[HttpCurrentUser.LocalUserIdItem] = user.Id;

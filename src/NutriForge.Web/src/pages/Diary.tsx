@@ -771,7 +771,7 @@ function DayEntries({
                 <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">
                   {slot}
                 </h3>
-                <div className="overflow-hidden rounded-lg border border-slate-800">
+                <div className="overflow-x-auto rounded-lg border border-slate-800">
                   <table className="w-full text-sm">
                     <tbody className="divide-y divide-slate-800">
                       {list.map((e) => (
@@ -848,7 +848,7 @@ function TotalsRow({
   );
 
   return (
-    <div className="overflow-hidden rounded-lg border border-brand-500/30 bg-brand-500/5">
+    <div className="overflow-x-auto rounded-lg border border-brand-500/30 bg-brand-500/5">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-xs text-slate-500">
