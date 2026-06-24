@@ -43,15 +43,18 @@ public static class DevDataSeeder
         db.Foods.AddRange(cola, proteinBar);
 
         // ---- Canonical ingredients (aisle + default food for nutrition) ----
-        var iChicken = Ing("chicken breast", "Meat & Seafood", chicken, gramsPerCount: 174, aliases: ["chicken"]);
-        var iRice = Ing("white rice", "Pantry", rice);
-        var iOats = Ing("rolled oats", "Pantry", oats, aliases: ["oats"]);
+        // YieldFactor (cooked = raw × factor) + whether the recipe states raw or cooked grams. The
+        // basis mirrors the linked food: "raw chicken"/"dry oats" ⇒ recipe grams are raw; "cooked rice"/
+        // "cooked beans" ⇒ recipe grams are cooked, so shopping divides the yield back out to buy raw.
+        var iChicken = Ing("chicken breast", "Meat & Seafood", chicken, gramsPerCount: 174, aliases: ["chicken"], yield: 0.75, gramsAreRaw: true);
+        var iRice = Ing("white rice", "Pantry", rice, yield: 2.8, gramsAreRaw: false);
+        var iOats = Ing("rolled oats", "Pantry", oats, aliases: ["oats"], yield: 2.2, gramsAreRaw: true);
         var iBanana = Ing("banana", "Produce", banana, gramsPerCount: 118);
         var iOil = Ing("olive oil", "Pantry", oliveOil, density: 0.91);
         var iAlmonds = Ing("almonds", "Pantry", almonds);
         var iYogurt = Ing("greek yogurt", "Dairy & Eggs", yogurt, aliases: ["yogurt"]);
         var iTofu = Ing("tofu", "Produce", tofu);
-        var iBeans = Ing("black beans", "Pantry", blackBeans, aliases: ["beans"]);
+        var iBeans = Ing("black beans", "Pantry", blackBeans, aliases: ["beans"], yield: 2.5, gramsAreRaw: false);
         var iSpinach = Ing("spinach", "Produce", spinach);
         var iPb = Ing("peanut butter", "Pantry", peanutButter);
         db.Ingredients.AddRange(iChicken, iRice, iOats, iBanana, iOil, iAlmonds, iYogurt, iTofu, iBeans, iSpinach, iPb);
@@ -96,7 +99,8 @@ public static class DevDataSeeder
     }
 
     private static Ingredient Ing(string name, string aisle, Domain.Catalog.Food food,
-        double? gramsPerCount = null, double? density = null, string[]? aliases = null)
+        double? gramsPerCount = null, double? density = null, string[]? aliases = null,
+        double yield = 1.0, bool gramsAreRaw = true)
         => new()
         {
             CanonicalName = name,
@@ -105,6 +109,8 @@ public static class DevDataSeeder
             GramsPerCount = gramsPerCount,
             DensityGPerMl = density,
             Aliases = [.. aliases ?? []],
+            YieldFactor = yield,
+            RecipeGramsAreRaw = gramsAreRaw,
         };
 
     private static DietType Diet(string slug, string name, List<string> tags, List<string> excluded)

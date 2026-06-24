@@ -210,7 +210,19 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
         var recipe = await db.Recipes.AsNoTracking()
             .Include(r => r.Ingredients)
             .FirstOrDefaultAsync(r => r.Id == id, ct).ConfigureAwait(false);
-        return recipe?.ToDto(currentUser.UserId);
+        if (recipe is null)
+        {
+            return null;
+        }
+
+        // Load the linked catalog ingredients so the detail can show raw (buy) vs cooked (plate) weights.
+        var ids = recipe.Ingredients.Where(i => i.IngredientId.HasValue).Select(i => i.IngredientId!.Value).ToHashSet();
+        var byId = ids.Count == 0
+            ? null
+            : await db.Ingredients.AsNoTracking().Where(i => ids.Contains(i.Id))
+                .ToDictionaryAsync(i => i.Id, ct).ConfigureAwait(false);
+
+        return recipe.ToDto(currentUser.UserId, byId);
     }
 
     public async Task<IReadOnlyList<RecipeSummary>> ListAsync(string? query, CancellationToken ct = default)

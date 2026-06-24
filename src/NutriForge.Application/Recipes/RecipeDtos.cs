@@ -49,7 +49,10 @@ public sealed record ImportPreviewDto(
 
 public sealed record RecipeIngredientDto(
     string Name, double Quantity, string? Unit, double Grams, bool Resolved,
-    double Kcal, double ProteinG, double FatG, double CarbG);
+    double Kcal, double ProteinG, double FatG, double CarbG,
+    // Raw (purchase/cook) vs cooked (plated) weight for this line (#85). Equal to Grams when the
+    // ingredient has no yield factor. RawGrams is what shopping buys; CookedGrams is what's plated.
+    double RawGrams = 0, double CookedGrams = 0);
 
 public sealed record RecipeDto(
     Guid Id, string Name, int Servings, int TotalMinutes, string? Instructions,
@@ -76,11 +79,17 @@ public sealed record ScaledIngredientDto(string Name, double Quantity, string? U
 
 internal static class RecipeMappings
 {
-    public static RecipeDto ToDto(this Recipe r, Guid? currentUserId = null) => new(
+    public static RecipeDto ToDto(
+        this Recipe r, Guid? currentUserId = null, IReadOnlyDictionary<Guid, Ingredient>? ingredientsById = null) => new(
         r.Id, r.Name, r.Servings, r.TotalMinutes, r.Instructions, r.Tags, r.IsNutritionComputed,
         r.KcalPerServing, r.ProteinPerServing, r.FatPerServing, r.CarbPerServing,
-        r.Ingredients.Select(i => new RecipeIngredientDto(
-            i.IngredientName, i.Quantity, i.Unit, i.Grams, i.Resolved, i.Kcal, i.ProteinG, i.FatG, i.CarbG)).ToList(),
+        r.Ingredients.Select(i =>
+        {
+            var ing = i.IngredientId is { } id && ingredientsById is not null && ingredientsById.TryGetValue(id, out var x) ? x : null;
+            return new RecipeIngredientDto(
+                i.IngredientName, i.Quantity, i.Unit, i.Grams, i.Resolved, i.Kcal, i.ProteinG, i.FatG, i.CarbG,
+                ing?.RawWeight(i.Grams) ?? i.Grams, ing?.CookedWeight(i.Grams) ?? i.Grams);
+        }).ToList(),
         r.IsGlobal, r.IsMine(currentUserId),
         r.SourceUrl, r.SourceType, r.SourceVideoId, r.ThumbnailUrl);
 

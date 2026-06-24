@@ -651,6 +651,41 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         }
     }
 
+    /// <summary>
+    /// Raw vs cooked yields (#85): a seeded recipe with cooked-basis rice (yield 2.8) and raw-basis
+    /// chicken (yield 0.75) reports raw purchase weight below the cooked rice volume, and cooked chicken
+    /// below its raw weight — the "cantidad cruda / cocida" columns.
+    /// </summary>
+    [Fact]
+    public async Task Recipe_detail_reports_raw_and_cooked_weights_from_yield_factors()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"yield-{Guid.NewGuid():N}");
+
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/v1/recipes", Json);
+        var riceRecipe = list.EnumerateArray()
+            .First(r => r.GetProperty("name").GetString()!.Contains("rice", StringComparison.OrdinalIgnoreCase));
+        var detail = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/v1/recipes/{riceRecipe.GetProperty("id").GetString()}", Json);
+        var ingredients = detail.GetProperty("ingredients").EnumerateArray().ToList();
+
+        // Rice is stated cooked ⇒ you buy LESS raw than the cooked weight (raw = cooked / 2.8).
+        var rice = ingredients.First(i => i.GetProperty("name").GetString()!.Contains("rice", StringComparison.OrdinalIgnoreCase));
+        var riceRaw = rice.GetProperty("rawGrams").GetDouble();
+        var riceCooked = rice.GetProperty("cookedGrams").GetDouble();
+        Assert.True(riceRaw < riceCooked, $"rice raw {riceRaw} should be < cooked {riceCooked}");
+        Assert.Equal(riceCooked / 2.8, riceRaw, 1);
+
+        // Chicken is stated raw ⇒ it loses water, so cooked < raw (cooked = raw × 0.75).
+        var chicken = ingredients.FirstOrDefault(i => i.GetProperty("name").GetString()!.Contains("chicken", StringComparison.OrdinalIgnoreCase));
+        if (chicken.ValueKind == JsonValueKind.Object)
+        {
+            var chRaw = chicken.GetProperty("rawGrams").GetDouble();
+            var chCooked = chicken.GetProperty("cookedGrams").GetDouble();
+            Assert.True(chCooked < chRaw, $"chicken cooked {chCooked} should be < raw {chRaw}");
+            Assert.Equal(chRaw * 0.75, chCooked, 1);
+        }
+    }
+
     // ---- recipe-ownership helpers ----
 
     private static async Task<JsonElement> CreateRecipeAsync(

@@ -106,6 +106,9 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(i => i.CanonicalName).HasMaxLength(200).IsRequired();
             e.Property(i => i.AisleCategory).HasMaxLength(50);
             e.HasIndex(i => i.CanonicalName);
+            // Raw↔cooked yield (#85): defaults backfill existing rows as "eaten as-is, stated raw".
+            e.Property(i => i.YieldFactor).HasDefaultValue(1.0);
+            e.Property(i => i.RecipeGramsAreRaw).HasDefaultValue(true);
         });
 
         b.Entity<Recipe>(e =>

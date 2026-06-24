@@ -271,6 +271,10 @@ export interface RecipeIngredient {
   proteinG: number;
   fatG: number;
   carbG: number;
+  /** Raw (purchase/cook) weight — what you buy. Equals `grams` when the ingredient has no yield factor. */
+  rawGrams: number;
+  /** Cooked (plated) weight — what ends up on the plate. */
+  cookedGrams: number;
 }
 
 export interface RecipeDto extends RecipeSummary {

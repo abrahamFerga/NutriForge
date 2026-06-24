@@ -78,6 +78,28 @@ public sealed class RecipesAndShoppingTests
         Assert.Equal(300, meatAisle.Items.Single().Grams);
     }
 
+    [Fact]
+    public async Task Shopping_list_buys_raw_purchase_weight_using_the_yield_factor()
+    {
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
+        var rice = SeedFoodAndIngredient(db, "rice", "Pantry", 130, 2.7, 0.3, 28.2);
+        rice.YieldFactor = 2.8;
+        rice.RecipeGramsAreRaw = false; // the recipe states cooked rice
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
+        var bowl = await recipes.CreateAsync(new CreateRecipeRequest("Rice bowl", 1, 10, null, ["dinner"],
+            [new RecipeIngredientInput(280, "g", "rice")]), ownerUserId: userId);
+
+        var shopping = new ShoppingListService(db, db);
+        var list = await shopping.GenerateAsync(userId, [new ShoppingRecipeLine(bowl.Id, 1)], mealPlanId: null);
+
+        // 280 g cooked rice ⇒ buy 100 g raw (280 / 2.8). Shopping is in RAW purchase weight.
+        var riceItem = list.Aisles.SelectMany(a => a.Items).Single(i => i.IngredientName == "rice");
+        Assert.Equal(100, riceItem.Grams, 1);
+    }
+
     [Theory]
     [InlineData(2, "tbsp", null, 30)]      // 2 tbsp × 15 ml × 1.0 density
     [InlineData(1, "cup", null, 240)]      // 1 cup = 240 ml × 1.0

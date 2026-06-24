@@ -509,7 +509,10 @@ function RecipeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                             Ingredient
                           </th>
                           <th className="px-3 py-2 text-right font-medium">
-                            Grams
+                            Raw (buy)
+                          </th>
+                          <th className="px-3 py-2 text-right font-medium">
+                            Cooked
                           </th>
                           <th className="px-3 py-2 text-right font-medium">
                             kcal
@@ -517,28 +520,40 @@ function RecipeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800">
-                        {recipe.data.ingredients.map((ing, i) => (
-                          <tr key={`${ing.name}-${i}`}>
-                            <td className="px-3 py-2">
-                              <p className="text-slate-100">{ing.name}</p>
-                              <p className="text-xs text-slate-500">
-                                {round(ing.quantity, 2)}
-                                {ing.unit ? ` ${ing.unit}` : ""}
-                                {ing.resolved ? null : (
-                                  <span className="ml-1.5 text-amber-400">
-                                    · unresolved
+                        {recipe.data.ingredients.map((ing, i) => {
+                          const differs =
+                            Math.abs(ing.rawGrams - ing.cookedGrams) >= 1;
+                          return (
+                            <tr key={`${ing.name}-${i}`}>
+                              <td className="px-3 py-2">
+                                <p className="text-slate-100">{ing.name}</p>
+                                <p className="text-xs text-slate-500">
+                                  {round(ing.quantity, 2)}
+                                  {ing.unit ? ` ${ing.unit}` : ""}
+                                  {ing.resolved ? null : (
+                                    <span className="ml-1.5 text-amber-400">
+                                      · unresolved
+                                    </span>
+                                  )}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap text-slate-300">
+                                {round(ing.rawGrams)}g
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap text-slate-300">
+                                {round(ing.cookedGrams)}g
+                                {differs ? (
+                                  <span className="ml-1 text-[10px] text-slate-500">
+                                    cooked
                                   </span>
-                                )}
-                              </p>
-                            </td>
-                            <td className="px-3 py-2 text-right whitespace-nowrap text-slate-300">
-                              {round(ing.grams)}g
-                            </td>
-                            <td className="px-3 py-2 text-right whitespace-nowrap text-slate-300">
-                              {round(ing.kcal)}
-                            </td>
-                          </tr>
-                        ))}
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2 text-right whitespace-nowrap text-slate-300">
+                                {round(ing.kcal)}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
