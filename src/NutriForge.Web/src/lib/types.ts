@@ -272,6 +272,10 @@ export interface RecipeIngredient {
 export interface RecipeDto extends RecipeSummary {
   instructions: string | null;
   ingredients: RecipeIngredient[];
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  sourceVideoId?: string | null;
+  thumbnailUrl?: string | null;
 }
 
 export interface CreateRecipeIngredient {
@@ -287,6 +291,24 @@ export interface CreateRecipeRequest {
   instructions?: string;
   tags?: string[];
   ingredients: CreateRecipeIngredient[];
+  // Provenance, carried through when saving an imported recipe.
+  sourceUrl?: string;
+  sourceType?: string;
+  sourceVideoId?: string;
+  thumbnailUrl?: string;
+}
+
+/** A request to import a recipe from a YouTube/recipe URL or pasted recipe text. */
+export interface ImportRecipeRequest {
+  url?: string;
+  text?: string;
+}
+
+/** An editable draft from an import — the user reviews/edits it, then saves via createRecipe. */
+export interface ImportPreviewDto {
+  draft: RecipeDto;
+  servingsAssumed: boolean;
+  warnings: string[];
 }
 
 export interface ScaledIngredient {

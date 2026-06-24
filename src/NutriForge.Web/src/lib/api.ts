@@ -12,6 +12,8 @@ import type {
   DietPlanDto,
   FoodDetail,
   FoodSummary,
+  ImportPreviewDto,
+  ImportRecipeRequest,
   LogProposal,
   MealSlot,
   PantryItem,
@@ -288,6 +290,16 @@ export const recipesApi = {
     return request<RecipeScaleDto>(
       `/api/v1/recipes/${encodeURIComponent(id)}/scale?servings=${servings}`,
     );
+  },
+  /**
+   * Imports a recipe from a YouTube/recipe URL or pasted text → an editable draft.
+   * Throws {@link ApiError} 503 (no AI provider) or 422 (nothing extractable).
+   */
+  importPreview(body: ImportRecipeRequest): Promise<ImportPreviewDto> {
+    return request<ImportPreviewDto>("/api/v1/recipes/import/preview", {
+      method: "POST",
+      body,
+    });
   },
 };
 

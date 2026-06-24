@@ -6,8 +6,10 @@ import {
   Clock,
   Plus,
   Search,
+  Sparkles,
   Trash2,
   Utensils,
+  Youtube,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,10 +18,11 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, LoadingState } from "@/components/StateMessage";
 import { useDebounced } from "@/hooks/useQueries";
-import { recipesApi } from "@/lib/api";
+import { ApiError, recipesApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   CreateRecipeIngredient,
+  ImportPreviewDto,
   RecipeSummary,
 } from "@/lib/types";
 import { round } from "@/lib/utils";
@@ -27,6 +30,8 @@ import { round } from "@/lib/utils";
 export function Recipes() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [importDraft, setImportDraft] = useState<ImportPreviewDto | null>(null);
 
   if (selectedId) {
     return (
@@ -43,18 +48,126 @@ export function Recipes() {
             Browse recipes and their per-serving nutrition
           </p>
         </div>
-        <Button onClick={() => setShowForm((v) => !v)}>
-          <Plus className="h-4 w-4" />
-          New recipe
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setShowImport((v) => !v);
+              setShowForm(false);
+              setImportDraft(null);
+            }}
+          >
+            <Youtube className="h-4 w-4" />
+            Import
+          </Button>
+          <Button
+            onClick={() => {
+              setShowForm((v) => !v);
+              setShowImport(false);
+              setImportDraft(null);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            New recipe
+          </Button>
+        </div>
       </div>
 
-      {showForm ? (
+      {showImport && !importDraft ? (
+        <ImportPanel
+          onPreview={(d) => {
+            setImportDraft(d);
+            setShowImport(false);
+          }}
+        />
+      ) : null}
+
+      {importDraft ? (
+        <NewRecipeForm
+          draft={importDraft}
+          onCreated={() => setImportDraft(null)}
+          onCancel={() => setImportDraft(null)}
+        />
+      ) : showForm ? (
         <NewRecipeForm onCreated={() => setShowForm(false)} />
       ) : null}
 
       <RecipeList onSelect={setSelectedId} />
     </div>
+  );
+}
+
+// -------------------- Import panel --------------------
+
+function ImportPanel({ onPreview }: { onPreview: (d: ImportPreviewDto) => void }) {
+  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
+
+  const preview = useMutation({
+    mutationFn: () =>
+      recipesApi.importPreview({
+        url: url.trim() || undefined,
+        text: text.trim() || undefined,
+      }),
+    onSuccess: onPreview,
+  });
+
+  const noProvider =
+    preview.error instanceof ApiError && preview.error.status === 503;
+  const canSubmit =
+    (url.trim().length > 0 || text.trim().length > 0) && !preview.isPending;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Import a recipe</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1">
+          <Label htmlFor="imp-url">YouTube or recipe URL</Label>
+          <Input
+            id="imp-url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://www.youtube.com/watch?v=…"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="imp-text">…or paste the recipe text</Label>
+          <textarea
+            id="imp-text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            placeholder="Paste ingredients + steps — handy when a video has no description"
+            className="flex w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30 focus-visible:outline-none"
+          />
+        </div>
+
+        {noProvider ? (
+          <p className="rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+            Recipe import needs an AI provider — set OPENAI_API_KEY (and a
+            YouTube&nbsp;Data&nbsp;API key to auto-read video descriptions).
+          </p>
+        ) : preview.isError ? (
+          <ErrorState error={preview.error} />
+        ) : null}
+
+        <Button
+          onClick={() => preview.mutate()}
+          disabled={!canSubmit}
+          className="w-full"
+        >
+          {preview.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+          Extract recipe
+        </Button>
+        <p className="text-xs text-slate-500">
+          We read the video title + description (or your pasted text), extract
+          the recipe, and compute calories from the catalog. You review &amp;
+          confirm before saving.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -209,6 +322,31 @@ function RecipeDetail({ id, onBack }: { id: string; onBack: () => void }) {
             </div>
           </div>
 
+          {recipe.data.sourceVideoId ? (
+            <Card>
+              <CardContent className="p-0">
+                <div className="aspect-video w-full overflow-hidden rounded-lg">
+                  <iframe
+                    className="h-full w-full"
+                    src={`https://www.youtube.com/embed/${recipe.data.sourceVideoId}`}
+                    title={recipe.data.name}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ) : recipe.data.sourceUrl ? (
+            <a
+              href={recipe.data.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-block text-sm font-medium text-brand-400 hover:underline"
+            >
+              View source ↗
+            </a>
+          ) : null}
+
           <div className="grid gap-6 lg:grid-cols-5">
             <div className="lg:col-span-3">
               <Card>
@@ -339,14 +477,31 @@ function emptyLine(): IngredientLine {
   return { quantity: "", unit: "", name: "" };
 }
 
-function NewRecipeForm({ onCreated }: { onCreated: () => void }) {
+function NewRecipeForm({
+  onCreated,
+  draft,
+  onCancel,
+}: {
+  onCreated: () => void;
+  draft?: ImportPreviewDto;
+  onCancel?: () => void;
+}) {
   const qc = useQueryClient();
-  const [name, setName] = useState("");
-  const [servings, setServings] = useState("2");
-  const [minutes, setMinutes] = useState("30");
-  const [tags, setTags] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [lines, setLines] = useState<IngredientLine[]>([emptyLine()]);
+  const d = draft?.draft;
+  const [name, setName] = useState(d?.name ?? "");
+  const [servings, setServings] = useState(String(d?.servings ?? 2));
+  const [minutes, setMinutes] = useState(String(d?.totalMinutes ?? 30));
+  const [tags, setTags] = useState((d?.tags ?? []).join(", "));
+  const [instructions, setInstructions] = useState(d?.instructions ?? "");
+  const [lines, setLines] = useState<IngredientLine[]>(
+    d && d.ingredients.length > 0
+      ? d.ingredients.map((i) => ({
+          quantity: i.quantity ? String(i.quantity) : "",
+          unit: i.unit ?? "",
+          name: i.name,
+        }))
+      : [emptyLine()],
+  );
 
   const create = useMutation({
     mutationFn: () => {
@@ -367,6 +522,11 @@ function NewRecipeForm({ onCreated }: { onCreated: () => void }) {
           .map((t) => t.trim())
           .filter((t) => t.length > 0),
         ingredients,
+        // Carry provenance through when saving an imported draft.
+        sourceUrl: d?.sourceUrl ?? undefined,
+        sourceType: d?.sourceType ?? undefined,
+        sourceVideoId: d?.sourceVideoId ?? undefined,
+        thumbnailUrl: d?.thumbnailUrl ?? undefined,
       });
     },
     onSuccess: () => {
@@ -387,9 +547,38 @@ function NewRecipeForm({ onCreated }: { onCreated: () => void }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>New recipe</CardTitle>
+        <CardTitle>{draft ? "Review imported recipe" : "New recipe"}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {draft ? (
+          <div className="space-y-2">
+            {d?.thumbnailUrl ? (
+              <img
+                src={d.thumbnailUrl}
+                alt=""
+                className="h-36 w-full rounded-lg object-cover"
+              />
+            ) : null}
+            {draft.warnings.length > 0 ? (
+              <ul className="space-y-1 rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+                {draft.warnings.map((w, i) => (
+                  <li key={i}>• {w}</li>
+                ))}
+              </ul>
+            ) : null}
+            {d?.sourceUrl ? (
+              <a
+                href={d.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block text-xs font-medium text-brand-400 hover:underline"
+              >
+                Source ↗
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-2">
             <Label htmlFor="r-name">Name</Label>
@@ -502,11 +691,11 @@ function NewRecipeForm({ onCreated }: { onCreated: () => void }) {
         <div className="flex gap-2">
           <Button onClick={() => create.mutate()} disabled={!canSubmit}>
             {create.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
-            Create recipe
+            {draft ? "Save recipe" : "Create recipe"}
           </Button>
           <Button
             variant="outline"
-            onClick={onCreated}
+            onClick={onCancel ?? onCreated}
             disabled={create.isPending}
           >
             Cancel
