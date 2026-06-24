@@ -20,6 +20,8 @@ builder.AddServiceDefaults();
 
 // Persistence, caching, audit-outbox, clock (Aspire-wired Postgres + Redis).
 builder.AddInfrastructure();
+// The background relays (outbox dispatch, diet generation) run in the API host today.
+builder.AddInfrastructureBackgroundServices();
 
 // The agentic layer: MAF NutritionAssistant (provider-swappable; unconfigured ⇒ 503).
 builder.AddAiAssistant();
@@ -81,6 +83,7 @@ app.MapAssistantEndpoints();
 app.MapRecipeEndpoints();
 app.MapPlanningEndpoints();
 app.MapDietPlanEndpoints();
+app.MapNotificationEndpoints();
 
 await app.InitializeDatabaseAsync();
 

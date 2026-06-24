@@ -42,12 +42,26 @@ public static class DependencyInjection
         builder.AddRedisClient("cache");
         services.AddSingleton<IFoodSearchCache, RedisFoodSearchCache>();
 
-        // The transactional-outbox relay (audit → separate DB).
-        services.AddHostedService<OutboxDispatcher>();
-
-        // Diet generation: the OR-Tools LP portion optimizer (REPAIR) + the async generation worker.
+        // The OR-Tools LP portion optimizer (REPAIR) — a dependency of the generator, used by both
+        // the synchronous API path and the background generation worker, so it lives here.
         services.AddSingleton<Application.DietGen.IPortionOptimizer, DietGen.OrToolsPortionOptimizer>();
-        services.AddHostedService<DietGen.DietPlanGenerationWorker>();
+
+        return builder;
+    }
+
+    /// <summary>
+    /// The background relays/workers. Register in exactly ONE host so a fan-out doesn't run twice.
+    /// Today the API owns them; they are deliberately NOT in <see cref="AddInfrastructure"/> so the
+    /// ImportWorker can call AddInfrastructure() for DB access without double-starting them.
+    /// </summary>
+    public static IHostApplicationBuilder AddInfrastructureBackgroundServices(this IHostApplicationBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // The transactional-outbox relay (audit → separate DB).
+        builder.Services.AddHostedService<OutboxDispatcher>();
+        // Async diet-plan generation.
+        builder.Services.AddHostedService<DietGen.DietPlanGenerationWorker>();
 
         return builder;
     }

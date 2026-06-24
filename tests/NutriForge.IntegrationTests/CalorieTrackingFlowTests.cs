@@ -319,6 +319,28 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(2, two.GetProperty("eaters").GetInt32());
     }
 
+    /// <summary>The on-demand daily summary sends to the (default) mock channel and lands in the outbox.</summary>
+    [Fact]
+    public async Task Daily_summary_sends_to_the_mock_channel_outbox()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"notif-{Guid.NewGuid():N}");
+
+        using var post = new HttpRequestMessage(HttpMethod.Post, "/api/v1/notifications/daily-summary");
+        using var res = await client.SendAsync(post);
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+
+        var result = await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.True(result.GetProperty("sent").GetBoolean());
+        Assert.Equal("mock", result.GetProperty("channel").GetString());
+        var message = result.GetProperty("message").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(message));
+
+        var outbox = await client.GetFromJsonAsync<JsonElement>("/api/v1/notifications/outbox", Json);
+        Assert.True(outbox.GetArrayLength() >= 1, "expected the sent summary in the outbox");
+        Assert.Equal("mock", outbox[0].GetProperty("channel").GetString());
+        Assert.Equal(message, outbox[0].GetProperty("body").GetString());
+    }
+
     /// <summary>The meal-prep PDF export renders a real PDF for a ready plan.</summary>
     [Fact]
     public async Task Diet_plan_pdf_export_returns_a_valid_pdf()

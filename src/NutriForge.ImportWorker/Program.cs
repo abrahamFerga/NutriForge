@@ -1,9 +1,16 @@
+using NutriForge.Infrastructure;
 using NutriForge.ImportWorker;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 // OpenTelemetry + health checks + resilience, same as the API.
 builder.AddServiceDefaults();
+
+// Persistence + caching + clock (Aspire-wired appdb + cache) so background loops can touch the DB.
+// NOTE: the shared background relays are NOT registered here (the API host owns them) to avoid a
+// double fan-out; this host registers only its own workers.
+builder.AddInfrastructure();
+
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

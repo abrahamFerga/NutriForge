@@ -43,6 +43,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
+    public DbSet<Domain.Notifications.ChannelMessage> ChannelMessages => Set<Domain.Notifications.ChannelMessage>();
 
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
@@ -237,6 +238,17 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(s => s.Id);
             e.Property(s => s.MealSlot).HasConversion<string>().HasMaxLength(20);
             e.Property(s => s.RecipeName).HasMaxLength(300);
+        });
+
+        b.Entity<Domain.Notifications.ChannelMessage>(e =>
+        {
+            e.ToTable("channel_messages", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.ChannelName).HasMaxLength(20);
+            e.Property(m => m.ChatId).HasMaxLength(64);
+            e.Property(m => m.Body).HasMaxLength(2000);
+            e.HasIndex(m => new { m.UserId, m.CreatedAt });
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
         });
 
         // ---- Operational infra ----
