@@ -166,6 +166,27 @@ export interface CreateDiaryEntryRequest {
   quantity: number;
 }
 
+// ---- Photo food logging ----
+
+/** A food recognized in a meal photo: a trusted catalog match, or a flagged AI estimate. */
+export interface PhotoFoodCandidate {
+  label: string;
+  source: "catalog" | "estimate";
+  foodId: string | null;
+  portionId: string | null;
+  quantity: number;
+  grams: number;
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+  confidence: number;
+}
+
+export interface PhotoAnalysisResult {
+  items: PhotoFoodCandidate[];
+}
+
 export interface TrendPoint {
   date: string;
   kcal: number;

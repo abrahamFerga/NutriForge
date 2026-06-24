@@ -336,6 +336,21 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4)); // PDF magic number
     }
 
+    /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>
+    [Fact]
+    public async Task Photo_parse_degrades_gracefully_without_a_vision_provider()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"photo-{Guid.NewGuid():N}");
+
+        using var content = new MultipartFormDataContent();
+        var image = new ByteArrayContent(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10 }); // tiny fake JPEG
+        image.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        content.Add(image, "image", "meal.jpg");
+
+        using var res = await client.PostAsync("/api/v1/diary/parse-photo", content);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+    }
+
     /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>
     private static async Task<JsonElement> CreateReadyPlanAsync(HttpClient client, int? eaters, int days = 3)
     {

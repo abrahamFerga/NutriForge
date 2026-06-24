@@ -19,6 +19,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<AssistantTools>();
         builder.Services.AddScoped<NutritionAssistantService>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.INlDiaryParser, Assistant.NlDiaryParser>();
+        builder.Services.AddScoped<NutriForge.Application.Abstractions.IFoodPhotoParser, Assistant.FoodPhotoParser>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IDietIntentParser, Assistant.DietIntentParser>();
 
         return builder;

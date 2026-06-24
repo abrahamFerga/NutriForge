@@ -15,6 +15,7 @@ import type {
   LogProposal,
   MealSlot,
   PantryItem,
+  PhotoAnalysisResult,
   ProfileDto,
   RecipeDto,
   RecipeScaleDto,
@@ -221,6 +222,52 @@ export const diaryApi = {
       method: "POST",
       body: { text, mealSlot, date },
     });
+  },
+  /**
+   * Sends a meal photo (multipart) for vision recognition → confirmable candidates.
+   * Throws {@link ApiError} 503 when no vision provider is configured.
+   */
+  async parsePhoto(
+    file: File,
+    mealSlot: MealSlot,
+    date: string,
+  ): Promise<PhotoAnalysisResult> {
+    const headers = new Headers();
+    headers.set("X-Debug-Subject", "demo-user");
+    headers.set("X-Debug-Role", "user");
+    headers.set("Accept", "application/json");
+    headers.set("Idempotency-Key", crypto.randomUUID());
+    // No Content-Type: the browser sets the multipart boundary for FormData.
+
+    const form = new FormData();
+    form.append("image", file);
+    form.append("mealSlot", mealSlot);
+    form.append("date", date);
+
+    const response = await fetch(buildUrl("/api/v1/diary/parse-photo"), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let problem: ProblemDetails = {};
+      if (text) {
+        try {
+          problem = JSON.parse(text) as ProblemDetails;
+        } catch {
+          /* non-JSON body */
+        }
+      }
+      throw new ApiError(
+        formatProblem(problem, `Request failed (${response.status} ${response.statusText})`),
+        response.status,
+        problem,
+      );
+    }
+
+    return response.json() as Promise<PhotoAnalysisResult>;
   },
 };
 
