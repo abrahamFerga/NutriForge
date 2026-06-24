@@ -62,6 +62,8 @@ public static class DependencyInjection
         builder.Services.AddHostedService<OutboxDispatcher>();
         // Async diet-plan generation.
         builder.Services.AddHostedService<DietGen.DietPlanGenerationWorker>();
+        // Scheduled daily calorie summaries to subscribed channels.
+        builder.Services.AddHostedService<Notifications.DailySummaryWorker>();
 
         return builder;
     }
