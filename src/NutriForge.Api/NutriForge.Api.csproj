@@ -18,6 +18,7 @@
     <ProjectReference Include="..\NutriForge.Infrastructure.Ai\NutriForge.Infrastructure.Ai.csproj" />
     <ProjectReference Include="..\NutriForge.Infrastructure.OpenFoodFacts\NutriForge.Infrastructure.OpenFoodFacts.csproj" />
     <ProjectReference Include="..\NutriForge.ServiceDefaults\NutriForge.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\NutriForge.Infrastructure.RecipeImport\NutriForge.Infrastructure.RecipeImport.csproj" />
   </ItemGroup>
 
 </Project>

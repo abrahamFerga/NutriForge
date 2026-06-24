@@ -8,6 +8,7 @@ using NutriForge.Application.Abstractions;
 using NutriForge.Infrastructure;
 using NutriForge.Infrastructure.Ai;
 using NutriForge.Infrastructure.OpenFoodFacts;
+using NutriForge.Infrastructure.RecipeImport;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,6 +26,10 @@ builder.AddAiAssistant();
 
 // Open Food Facts connector — barcode fetch-on-miss for low-friction logging.
 builder.Services.AddOpenFoodFacts();
+
+// Recipe-import connectors (YouTube metadata). The Data API key is optional — without it, import
+// falls back to oEmbed title/thumbnail + pasted recipe text (no auto-fetched description).
+builder.Services.AddRecipeImport(builder.Configuration["YouTube:ApiKey"]);
 
 // The request-scoped authenticated principal (overrides the worker's system principal).
 builder.Services.AddHttpContextAccessor();

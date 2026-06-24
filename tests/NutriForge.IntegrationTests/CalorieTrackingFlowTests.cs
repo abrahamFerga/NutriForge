@@ -336,6 +336,51 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4)); // PDF magic number
     }
 
+    /// <summary>Recipe import is wired and degrades to 503 when no AI provider is configured.</summary>
+    [Fact]
+    public async Task Recipe_import_preview_degrades_to_503_without_a_provider()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"import-{Guid.NewGuid():N}");
+        using var res = await client.PostAsJsonAsync("/api/v1/recipes/import/preview",
+            new { url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }, Json);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+    }
+
+    /// <summary>An imported recipe persists its source fields, and re-importing the same video dedups.</summary>
+    [Fact]
+    public async Task Imported_recipe_carries_source_fields_and_dedups_by_video_id()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"recipe-src-{Guid.NewGuid():N}");
+        var videoId = Guid.NewGuid().ToString("N")[..11]; // unique 11-char id
+
+        object body = new
+        {
+            name = "Test imported recipe",
+            servings = 2,
+            totalMinutes = 10,
+            instructions = "mix it",
+            tags = new[] { "test" },
+            ingredients = new[] { new { quantity = 100.0, unit = "g", name = "egg" } },
+            sourceUrl = $"https://www.youtube.com/watch?v={videoId}",
+            sourceType = "youtube",
+            sourceVideoId = videoId,
+            thumbnailUrl = "https://example.com/thumb.jpg",
+        };
+
+        using var first = await client.PostAsJsonAsync("/api/v1/recipes", body, Json);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var created = await first.Content.ReadFromJsonAsync<JsonElement>(Json);
+        var id1 = created.GetProperty("id").GetString();
+        Assert.Equal(videoId, created.GetProperty("sourceVideoId").GetString());
+        Assert.Equal("youtube", created.GetProperty("sourceType").GetString());
+
+        // Re-importing the same video returns the SAME recipe (no duplicate in the public catalog).
+        using var second = await client.PostAsJsonAsync("/api/v1/recipes", body, Json);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var created2 = await second.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal(id1, created2.GetProperty("id").GetString());
+    }
+
     /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>
     [Fact]
     public async Task Photo_parse_degrades_gracefully_without_a_vision_provider()

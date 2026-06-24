@@ -1,3 +1,4 @@
+using NutriForge.Api.Setup;
 using NutriForge.Application.Authorization;
 using NutriForge.Application.Recipes;
 
@@ -37,6 +38,32 @@ public static class RecipeEndpoints
             var created = await recipes.CreateAsync(req, ct);
             return Results.Created($"/api/v1/recipes/{created.Id}", created);
         }).WithName("CreateRecipe");
+
+        // Import a recipe from a YouTube URL (or pasted recipe text) → an editable preview the user
+        // confirms by posting it to POST /recipes. The LLM recognizes; the catalog owns the numbers.
+        group.MapPost("/import/preview", async (ImportRecipeRequest req, RecipeImportService import, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Url) && string.IsNullOrWhiteSpace(req.Text))
+            {
+                return Results.Problem(title: "Nothing to import",
+                    detail: "Provide a YouTube/recipe URL or pasted recipe text.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            if (!import.IsConfigured)
+            {
+                return Results.Problem(title: "Recipe import unavailable",
+                    detail: "No AI provider is configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var preview = await import.PreviewAsync(req, ct);
+            return preview is null
+                ? Results.Problem(title: "Couldn't extract a recipe",
+                    detail: "No recipe found. For a YouTube link with an empty description, paste the recipe text.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity)
+                : Results.Ok(preview);
+        })
+            .RequireRateLimiting(RateLimitPolicies.Expensive)
+            .WithName("ImportRecipePreview");
 
         return app;
     }

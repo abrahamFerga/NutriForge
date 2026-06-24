@@ -16,6 +16,35 @@ public sealed class RecipeService(ICatalogDbContext db)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Dedup imported recipes: the catalog is public-read, so a video already imported (by anyone)
+        // is returned instead of creating a duplicate — fetch-on-miss semantics + idempotent re-import.
+        if (!string.IsNullOrWhiteSpace(request.SourceVideoId))
+        {
+            var existing = await db.Recipes.AsNoTracking().Include(r => r.Ingredients)
+                .FirstOrDefaultAsync(r => r.SourceVideoId == request.SourceVideoId, ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                return existing.ToDto();
+            }
+        }
+
+        var recipe = await BuildRecipeAsync(request, ct).ConfigureAwait(false);
+        db.Recipes.Add(recipe);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return recipe.ToDto();
+    }
+
+    /// <summary>Dry-run: build + resolve + compute nutrition WITHOUT persisting — for an import preview.</summary>
+    public async Task<RecipeDto> PreviewAsync(CreateRecipeRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var recipe = await BuildRecipeAsync(request, ct).ConfigureAwait(false);
+        return recipe.ToDto();
+    }
+
+    /// <summary>Build a Recipe with resolved ingredients + computed per-serving nutrition (not saved).</summary>
+    private async Task<Recipe> BuildRecipeAsync(CreateRecipeRequest request, CancellationToken ct)
+    {
         var ingredients = await db.Ingredients.AsNoTracking().ToListAsync(ct).ConfigureAwait(false);
         var foodIds = ingredients.Where(i => i.DefaultFoodId.HasValue).Select(i => i.DefaultFoodId!.Value).ToHashSet();
         var foods = await db.Foods.AsNoTracking()
@@ -29,6 +58,10 @@ public sealed class RecipeService(ICatalogDbContext db)
             TotalMinutes = request.TotalMinutes,
             Instructions = request.Instructions,
             Tags = [.. (request.Tags ?? []).Select(t => t.Trim().ToLowerInvariant())],
+            SourceUrl = request.SourceUrl,
+            SourceType = request.SourceType,
+            SourceVideoId = request.SourceVideoId,
+            ThumbnailUrl = request.ThumbnailUrl,
         };
 
         foreach (var line in request.Ingredients ?? [])
@@ -56,9 +89,7 @@ public sealed class RecipeService(ICatalogDbContext db)
         }
 
         recipe.RecomputeNutrition();
-        db.Recipes.Add(recipe);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return recipe.ToDto();
+        return recipe;
     }
 
     public async Task<RecipeDto?> GetAsync(Guid id, CancellationToken ct = default)

@@ -18,6 +18,13 @@ public sealed class Recipe : IAuditable, ITimestamped
     /// <summary>Free-form tags (cuisine, "vegan", "high-protein", proteins) for filtering/variety.</summary>
     public List<string> Tags { get; set; } = [];
 
+    // Provenance for imported recipes (all null for hand-authored / seeded recipes). The source is
+    // only a link/embed — nutrition is still COMPUTED from resolved ingredients, never trusted from it.
+    public string? SourceUrl { get; set; }
+    public string? SourceType { get; set; }       // "youtube" | "web" | "manual"
+    public string? SourceVideoId { get; set; }     // canonical 11-char YouTube id — for embed + dedup
+    public string? ThumbnailUrl { get; set; }
+
     private readonly List<RecipeIngredient> _ingredients = [];
     public IReadOnlyCollection<RecipeIngredient> Ingredients => _ingredients;
 

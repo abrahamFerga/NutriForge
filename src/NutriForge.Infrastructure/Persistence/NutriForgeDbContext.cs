@@ -109,9 +109,15 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.ToTable("recipes", "catalog");
             e.HasKey(r => r.Id);
             e.Property(r => r.Name).HasMaxLength(300).IsRequired();
+            e.Property(r => r.SourceUrl).HasMaxLength(2048);
+            e.Property(r => r.SourceType).HasMaxLength(20);
+            e.Property(r => r.SourceVideoId).HasMaxLength(20);
+            e.Property(r => r.ThumbnailUrl).HasMaxLength(2048);
             e.HasMany(r => r.Ingredients).WithOne().HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(r => r.Ingredients).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasIndex(r => r.IsNutritionComputed);
+            // Dedup imported videos: at most one recipe per source video (partial index ignores nulls).
+            e.HasIndex(r => r.SourceVideoId).IsUnique().HasFilter("\"SourceVideoId\" IS NOT NULL");
         });
 
         b.Entity<RecipeIngredient>(e =>
