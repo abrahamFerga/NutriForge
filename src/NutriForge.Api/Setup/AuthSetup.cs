@@ -20,6 +20,17 @@ public static class AuthSetup
         var audience = config["Authentication:Audience"];
         var useJwt = !string.IsNullOrWhiteSpace(authority);
 
+        // Fail closed (#56): the header-based dev scheme trusts X-Debug-Subject / X-Debug-Role verbatim,
+        // so anyone could claim any identity or the admin role. It is therefore allowed ONLY in
+        // Development. A deployed API must validate real OIDC tokens — if no Authority is configured
+        // outside Development we refuse to start rather than silently expose an auth bypass.
+        if (!env.IsDevelopment() && !useJwt)
+        {
+            throw new InvalidOperationException(
+                "Authentication:Authority must be configured outside Development. The dev header auth " +
+                "scheme is disabled in deployed environments to prevent an identity/role bypass.");
+        }
+
         var auth = services.AddAuthentication(options =>
         {
             var scheme = useJwt ? JwtBearerDefaults.AuthenticationScheme : DevAuthenticationHandler.SchemeName;
