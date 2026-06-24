@@ -40,12 +40,18 @@ public static class AuthSetup
 
         if (useJwt)
         {
+            // Entra External ID (CIAM) issues the subject in "sub" and app-role assignments in "roles".
+            // Map those so HttpCurrentUser.Subject and the RequireRole(admin) policy work unchanged. The
+            // role-claim type is overridable for other IdPs via Authentication:RoleClaim.
+            var roleClaim = config["Authentication:RoleClaim"] ?? "roles";
             auth.AddJwtBearer(options =>
             {
                 options.Authority = authority;
                 options.Audience = audience;
+                options.MapInboundClaims = false; // keep raw "sub"/"roles" claim types
                 options.TokenValidationParameters.ValidateAudience = !string.IsNullOrWhiteSpace(audience);
-                options.MapInboundClaims = false; // keep the raw "sub"/"role" claim types
+                options.TokenValidationParameters.NameClaimType = "sub";
+                options.TokenValidationParameters.RoleClaimType = roleClaim;
             });
         }
         else
