@@ -453,3 +453,40 @@ export interface AdherencePoint {
   loggedKcal: number;
   adherencePct: number;
 }
+
+// ---- Batch-cook guide (#86) ----
+
+export interface BatchCookIngredient {
+  name: string;
+  /** Raw (purchase/cook) weight to cook for the whole block. */
+  rawGrams: number;
+}
+
+export interface BatchCookStep {
+  recipeName: string;
+  /** Appliance/method (Oven, Stovetop, No-cook, …) used to group parallel steps. */
+  method: string;
+  /** Servings to cook for everyone, for the whole block. */
+  cookServings: number;
+  /** Per-person/day portions to split the batch into. */
+  portionInto: number;
+  ingredients: BatchCookIngredient[];
+}
+
+export interface BatchCookBlock {
+  block: number;
+  /** Calendar-day range, e.g. "Days 1–3". */
+  days: string;
+  dayCount: number;
+  portions: number;
+  steps: BatchCookStep[];
+}
+
+export interface BatchCookPlanDto {
+  planId: string;
+  eaters: number;
+  portionMultiplier: number;
+  horizonDays: number;
+  blockSize: number;
+  blocks: BatchCookBlock[];
+}

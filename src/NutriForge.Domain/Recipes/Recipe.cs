@@ -29,6 +29,12 @@ public sealed class Recipe : IAuditable, ITimestamped
     public int TotalMinutes { get; set; }
     public string? Instructions { get; set; }
 
+    /// <summary>
+    /// Cooking method / appliance (e.g. "Oven", "Stovetop", "No-cook") used to GROUP parallel batch-cook
+    /// steps so the user runs the oven once for everything that bakes. Null ⇒ "Other".
+    /// </summary>
+    public string? CookMethod { get; set; }
+
     /// <summary>Free-form tags (cuisine, "vegan", "high-protein", proteins) for filtering/variety.</summary>
     public List<string> Tags { get; set; } = [];
 

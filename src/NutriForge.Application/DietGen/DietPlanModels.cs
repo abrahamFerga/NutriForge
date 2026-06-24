@@ -64,3 +64,26 @@ public sealed record DietPlanDto(
 
 public sealed record AdherenceDto(
     DateOnly Date, double PlannedKcal, double LoggedKcal, double AdherencePct);
+
+// ---- Batch-cook guide (#86) ----
+
+/// <summary>One ingredient to batch-cook, in RAW purchase/cook weight.</summary>
+public sealed record BatchCookIngredientDto(string Name, double RawGrams);
+
+/// <summary>
+/// One recipe to batch-cook for a block: cook <see cref="CookServings"/> servings' worth (for everyone,
+/// for the whole block) of these RAW ingredients on the given appliance, then split into
+/// <see cref="PortionInto"/> per-person/day portions.
+/// </summary>
+public sealed record BatchCookStepDto(
+    string RecipeName, string Method, double CookServings, int PortionInto,
+    IReadOnlyList<BatchCookIngredientDto> Ingredients);
+
+/// <summary>One block's cook session: cook once, eat for <see cref="DayCount"/> days.</summary>
+public sealed record BatchCookBlockDto(
+    int Block, string Days, int DayCount, int Portions, IReadOnlyList<BatchCookStepDto> Steps);
+
+/// <summary>The whole batch-cook guide for a plan, one cook session per day-block (steps grouped by appliance).</summary>
+public sealed record BatchCookPlanDto(
+    Guid PlanId, int Eaters, double PortionMultiplier, int HorizonDays, int BlockSize,
+    IReadOnlyList<BatchCookBlockDto> Blocks);

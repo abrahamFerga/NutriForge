@@ -8,7 +8,9 @@ import {
   AlertTriangle,
   Check,
   ChefHat,
+  CookingPot,
   FileDown,
+  Flame,
   Plus,
   ShoppingCart,
   Sparkles,
@@ -28,6 +30,8 @@ import { dietPlansApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   AdherencePoint,
+  BatchCookPlanDto,
+  BatchCookStep,
   CreateDietPlanRequest,
   DietPlanDto,
   DietPlanSlot,
@@ -383,6 +387,7 @@ function GeneratingCard({ timedOut }: { timedOut?: boolean }) {
 function ReadyPlan({ plan }: { plan: DietPlanDto }) {
   const qc = useQueryClient();
   const [shoppingList, setShoppingList] = useState<ShoppingListDto | null>(null);
+  const [batchCook, setBatchCook] = useState<BatchCookPlanDto | null>(null);
 
   // Each entry is one BLOCK (a distinct meal-set); with blockSize 1 a block is a single day.
   const days = useMemo(() => groupByDay(plan.slots), [plan.slots]);
@@ -404,6 +409,11 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
   const genList = useMutation({
     mutationFn: () => dietPlansApi.shoppingList(plan.id),
     onSuccess: (list) => setShoppingList(list),
+  });
+
+  const genBatch = useMutation({
+    mutationFn: () => dietPlansApi.batchCook(plan.id),
+    onSuccess: (guide) => setBatchCook(guide),
   });
 
   const downloadPdf = useMutation({
@@ -490,6 +500,7 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
 
           {accept.isError ? <ErrorState error={accept.error} /> : null}
           {genList.isError ? <ErrorState error={genList.error} /> : null}
+          {genBatch.isError ? <ErrorState error={genBatch.error} /> : null}
           {downloadPdf.isError ? <ErrorState error={downloadPdf.error} /> : null}
 
           <div className="flex flex-wrap gap-2">
@@ -513,6 +524,14 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
             </Button>
             <Button
               variant="outline"
+              onClick={() => genBatch.mutate()}
+              disabled={genBatch.isPending}
+            >
+              {genBatch.isPending ? <Spinner /> : <CookingPot className="h-4 w-4" />}
+              Batch-cook guide
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => downloadPdf.mutate()}
               disabled={downloadPdf.isPending}
             >
@@ -522,6 +541,8 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
           </div>
         </CardContent>
       </Card>
+
+      {batchCook ? <BatchCookGuide guide={batchCook} /> : null}
 
       <Card>
         <CardHeader>
@@ -685,6 +706,73 @@ function Stat({
       <p className="text-lg font-bold text-slate-100">{value}</p>
       {sub ? <p className="text-[11px] text-slate-500">{sub}</p> : null}
     </div>
+  );
+}
+
+// -------------------- Batch-cook guide (#86) --------------------
+
+function BatchCookGuide({ guide }: { guide: BatchCookPlanDto }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Batch-cook guide</CardTitle>
+        <p className="text-xs text-slate-400">
+          Cook once per block in RAW weight for {guide.eaters}{" "}
+          {guide.eaters === 1 ? "person" : "people"}, then split into portions.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {guide.blocks.map((block) => {
+          const byMethod = new Map<string, BatchCookStep[]>();
+          for (const s of block.steps) {
+            const arr = byMethod.get(s.method);
+            if (arr) arr.push(s);
+            else byMethod.set(s.method, [s]);
+          }
+          return (
+            <div key={block.block}>
+              <h3 className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+                  Block {block.block}
+                </span>
+                {block.days} · portion into {block.portions}
+              </h3>
+              <div className="space-y-3">
+                {[...byMethod.entries()].map(([method, steps]) => (
+                  <div
+                    key={method}
+                    className="rounded-lg border border-slate-800 bg-slate-950/40 p-3"
+                  >
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-300">
+                      <Flame className="h-3.5 w-3.5 text-orange-400" />
+                      {method}
+                    </p>
+                    {steps.map((s, i) => (
+                      <div key={i} className="mb-2 last:mb-0">
+                        <p className="text-sm text-slate-100">
+                          {s.recipeName}
+                          <span className="ml-1.5 text-xs text-slate-500">
+                            → cook {round(s.cookServings, 1)} servings · portion
+                            into {s.portionInto}
+                          </span>
+                        </p>
+                        <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-400">
+                          {s.ingredients.map((ing, j) => (
+                            <li key={j}>
+                              {round(ing.rawGrams)}g {ing.name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
   );
 }
 

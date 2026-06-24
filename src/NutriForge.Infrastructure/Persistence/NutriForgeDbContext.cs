@@ -116,6 +116,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.ToTable("recipes", "catalog");
             e.HasKey(r => r.Id);
             e.Property(r => r.Name).HasMaxLength(300).IsRequired();
+            e.Property(r => r.CookMethod).HasMaxLength(40);
             e.Property(r => r.SourceUrl).HasMaxLength(2048);
             e.Property(r => r.SourceType).HasMaxLength(20);
             e.Property(r => r.SourceVideoId).HasMaxLength(20);

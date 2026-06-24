@@ -1,5 +1,6 @@
 import type {
   AdherencePoint,
+  BatchCookPlanDto,
   CreateDiaryEntryRequest,
   CreateDietPlanRequest,
   CreateFoodRequest,
@@ -408,6 +409,12 @@ export const dietPlansApi = {
   adherence(id: string): Promise<AdherencePoint[]> {
     return request<AdherencePoint[]>(
       `/api/v1/diet-plans/${encodeURIComponent(id)}/adherence`,
+    );
+  },
+  /** The parallel batch-cook guide: one cook session per day-block, raw quantities by appliance. */
+  batchCook(id: string): Promise<BatchCookPlanDto> {
+    return request<BatchCookPlanDto>(
+      `/api/v1/diet-plans/${encodeURIComponent(id)}/batch-cook`,
     );
   },
   /** Fetches the printable meal-prep PDF as a Blob (dev-auth headers can't ride a plain link). */

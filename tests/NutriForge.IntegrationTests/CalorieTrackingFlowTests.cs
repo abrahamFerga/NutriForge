@@ -764,6 +764,47 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.InRange(g2x2 / g2, 1.98, 2.02);  // 2 people buy 2× — composes with, doesn't double, block-days
     }
 
+    /// <summary>
+    /// The batch-cook guide (#86) emits one cook session per block with raw quantities grouped by
+    /// appliance, portioned into (days × people), and its raw totals reconcile exactly with the shopping
+    /// list — both are the same raw purchase weight, just organised cook-first vs buy-first.
+    /// </summary>
+    [Fact]
+    public async Task Batch_cook_guide_groups_by_block_and_reconciles_with_the_shopping_list()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"batch-{Guid.NewGuid():N}");
+        var plan = await GenReadyBlockAsync(client, days: 6, blockSize: 3, eaters: 2);
+        var planId = plan.GetProperty("id").GetString()!;
+
+        var guide = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diet-plans/{planId}/batch-cook", Json);
+        var blocks = guide.GetProperty("blocks");
+        Assert.Equal(2, blocks.GetArrayLength()); // two 3-day blocks
+
+        double batchRaw = 0;
+        var methods = new HashSet<string>();
+        foreach (var block in blocks.EnumerateArray())
+        {
+            Assert.Equal(6, block.GetProperty("portions").GetInt32()); // 3 days × 2 people
+            Assert.True(block.GetProperty("steps").GetArrayLength() > 0, "each block cooks something");
+            foreach (var step in block.GetProperty("steps").EnumerateArray())
+            {
+                methods.Add(step.GetProperty("method").GetString()!);
+                Assert.Equal(6, step.GetProperty("portionInto").GetInt32());
+                foreach (var ing in step.GetProperty("ingredients").EnumerateArray())
+                {
+                    batchRaw += ing.GetProperty("rawGrams").GetDouble();
+                }
+            }
+        }
+
+        Assert.True(batchRaw > 0);
+        Assert.Contains(methods, m => !string.IsNullOrWhiteSpace(m)); // appliance grouping present
+
+        // Cook-first totals == buy-first totals (raw weight; the fresh subject has an empty pantry).
+        var shopRaw = await ShoppingGramsTotalAsync(client, planId);
+        Assert.InRange(batchRaw / shopRaw, 0.98, 1.02);
+    }
+
     private static int DistinctSlotDays(JsonElement plan) =>
         plan.GetProperty("slots").EnumerateArray().Select(s => s.GetProperty("day").GetInt32()).Distinct().Count();
 

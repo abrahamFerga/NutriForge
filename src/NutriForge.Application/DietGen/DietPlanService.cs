@@ -214,6 +214,72 @@ public sealed class DietPlanService(
             .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings * plan.BlockDaysFor(s.Day)) * plan.PortionMultiplier))
             .ToList();
 
+    /// <summary>
+    /// The parallel batch-cook guide (#86): for each day-block, the recipes to cook once for the whole
+    /// block — in RAW quantities (people × days), grouped by appliance — plus how many per-person/day
+    /// portions to split into. Derived from the plan; nothing persisted.
+    /// </summary>
+    public async Task<BatchCookPlanDto?> GetBatchCookPlanAsync(Guid userId, Guid id, CancellationToken ct = default)
+    {
+        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots).Include(p => p.Members)
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
+        if (plan is null || plan.Slots.Count == 0)
+        {
+            return null;
+        }
+
+        var recipeIds = plan.Slots.Select(s => s.RecipeId).ToHashSet();
+        var recipes = await catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
+            .Where(r => recipeIds.Contains(r.Id)).ToDictionaryAsync(r => r.Id, ct).ConfigureAwait(false);
+        var ingredientIds = recipes.Values.SelectMany(r => r.Ingredients)
+            .Where(i => i.IngredientId.HasValue).Select(i => i.IngredientId!.Value).ToHashSet();
+        var ingredients = await catalog.Ingredients.AsNoTracking()
+            .Where(i => ingredientIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, ct).ConfigureAwait(false);
+
+        var portion = plan.PortionMultiplier;
+        var blocks = new List<BatchCookBlockDto>();
+        var cursor = 1; // calendar-day cursor, so labels read "Days 1–3", "Days 4–6", …
+        foreach (var blockGroup in plan.Slots.GroupBy(s => s.Day).OrderBy(g => g.Key))
+        {
+            var block = blockGroup.Key;
+            var blockDays = plan.BlockDaysFor(block);
+            var start = cursor;
+            var end = cursor + Math.Max(blockDays, 1) - 1;
+            cursor = end + 1;
+            var portions = blockDays * plan.Eaters;
+
+            var steps = new List<BatchCookStepDto>();
+            foreach (var recipeGroup in blockGroup.GroupBy(s => s.RecipeId))
+            {
+                if (!recipes.TryGetValue(recipeGroup.Key, out var recipe))
+                {
+                    continue;
+                }
+
+                // Cook for everyone, for the whole block: per-primary servings × people × days.
+                var cookServings = recipeGroup.Sum(s => s.Servings) * portion * blockDays;
+                var scale = recipe.Servings <= 0 ? cookServings : cookServings / recipe.Servings;
+                var ings = recipe.Ingredients.Select(ri =>
+                {
+                    var ing = ri.IngredientId is { } iid && ingredients.TryGetValue(iid, out var x) ? x : null;
+                    var raw = (ing?.RawWeight(ri.Grams) ?? ri.Grams) * scale;
+                    return new BatchCookIngredientDto(ri.IngredientName, Math.Round(raw, 1));
+                }).ToList();
+
+                steps.Add(new BatchCookStepDto(
+                    recipe.Name, string.IsNullOrWhiteSpace(recipe.CookMethod) ? "Other" : recipe.CookMethod,
+                    Math.Round(cookServings, 2), portions, ings));
+            }
+
+            // Group by appliance (run the oven once for everything that bakes).
+            var ordered = steps.OrderBy(s => s.Method, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.RecipeName).ToList();
+            var daysLabel = start == end ? $"Day {start}" : $"Days {start}–{end}";
+            blocks.Add(new BatchCookBlockDto(block, daysLabel, blockDays, portions, ordered));
+        }
+
+        return new BatchCookPlanDto(plan.Id, plan.Eaters, portion, plan.HorizonDays, plan.BlockSize, blocks);
+    }
+
     /// <summary>Closed loop: how closely logged intake tracked the plan's daily target over the last week.</summary>
     public async Task<IReadOnlyList<AdherenceDto>> AdherenceAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
