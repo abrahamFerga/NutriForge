@@ -116,6 +116,13 @@ dotnet user-secrets --project src/NutriForge.AppHost set Parameters:openai-api-k
 #   …or leave it unset and let the Aspire dashboard prompt you for the value on first run.
 #   (optional) export OPENAI_CHAT_MODEL_NAME=gpt-4o-mini   # default model
 
+# OPTIONAL: a YouTube Data API key lets recipe import auto-read the video DESCRIPTION (where the
+# recipe usually is). Without it import still works via oEmbed (title/thumbnail) + pasted text, so
+# it never blocks startup — it's a first-class Aspire parameter with an empty default.
+#   dotnet user-secrets --project src/NutriForge.AppHost set Parameters:youtube-api-key "AIza..."
+#   …or export YOUTUBE_API_KEY=AIza...   (bridged to the parameter)
+#   …or set/leave it in the Aspire dashboard's Parameters; unset is fine (import just degrades).
+
 # run the whole system (API + Postgres + Redis + SPA) — needs Docker running
 ./scripts/run-and-wait.ps1          # or: dotnet run --project src/NutriForge.AppHost
 #   → open the Aspire dashboard URL it prints; the SPA + API resources are listed there.

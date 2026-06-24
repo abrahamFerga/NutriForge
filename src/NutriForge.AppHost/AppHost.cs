@@ -43,9 +43,12 @@ var api = builder.AddProject<Projects.NutriForge_Api>("api")
 //   • the Aspire dashboard's "set parameter value" prompt
 if (!underTest)
 {
+    // Precedence: user-secrets (Parameters:openai-api-key) wins; OPENAI_API_KEY only fills in when
+    // user-secrets didn't set it (note the ??=); otherwise the parameter is unresolved and Aspire
+    // prompts. REQUIRED — an unresolved parameter blocks API startup (the assistant is a core capability).
     if (Environment.GetEnvironmentVariable("OPENAI_API_KEY") is { Length: > 0 } envKey)
     {
-        builder.Configuration["Parameters:openai-api-key"] = envKey;
+        builder.Configuration["Parameters:openai-api-key"] ??= envKey;
     }
 
     var openAiKey = builder.AddParameter("openai-api-key", secret: true);
@@ -53,6 +56,23 @@ if (!underTest)
     api.WithEnvironment("Ai__Provider", "OpenAI")
         .WithEnvironment("Ai__Model", Environment.GetEnvironmentVariable("OPENAI_CHAT_MODEL_NAME") ?? "gpt-4o-mini")
         .WithEnvironment("Ai__ApiKey", openAiKey);
+
+    // YouTube Data API key — OPTIONAL. With it, recipe import auto-reads the video DESCRIPTION (where the
+    // recipe usually lives); without it, import degrades to keyless oEmbed (title + thumbnail) + pasted
+    // recipe text. So unlike the OpenAI key it must NEVER block startup. We still surface it as a
+    // first-class secret parameter (settable in the Aspire dashboard / user-secrets, just like the OpenAI
+    // key) but give it an EMPTY DEFAULT, set LAST so it only applies when neither user-secrets nor the
+    // YOUTUBE_API_KEY env supplied a value — an unset key then resolves to "" instead of halting the app
+    // (and an empty key makes YouTubeMetadataClient fall back to oEmbed).
+    if (Environment.GetEnvironmentVariable("YOUTUBE_API_KEY") is { Length: > 0 } ytKey)
+    {
+        builder.Configuration["Parameters:youtube-api-key"] ??= ytKey;
+    }
+
+    builder.Configuration["Parameters:youtube-api-key"] ??= "";
+
+    var youTubeKey = builder.AddParameter("youtube-api-key", secret: true);
+    api.WithEnvironment("YouTube__ApiKey", youTubeKey);
 }
 
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
