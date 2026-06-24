@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Check,
+  Copy,
   Plus,
   Search,
   Sparkles,
@@ -38,6 +39,7 @@ import {
 import { cn, round, toIsoDate, today } from "@/lib/utils";
 
 export function Diary() {
+  const qc = useQueryClient();
   const [date, setDate] = useState<string>(today());
   const [mealSlot, setMealSlot] = useState<MealSlot>("Breakfast");
 
@@ -50,6 +52,31 @@ export function Diary() {
     setDate(toIsoDate(d));
   }
 
+  // Copy every entry from the previous day onto this day (re-logged by grams, so each gets a fresh
+  // log-time nutrition snapshot). Reuses the normal GET/POST diary endpoints — no backend change.
+  const copyYesterday = useMutation({
+    mutationFn: async () => {
+      const y = new Date(date + "T00:00:00");
+      y.setDate(y.getDate() - 1);
+      const prev = await diaryApi.get(toIsoDate(y));
+      for (const e of prev.entries) {
+        await diaryApi.create({
+          date,
+          mealSlot: e.mealSlot,
+          foodId: e.foodId,
+          portionId: null,
+          quantity: e.grams,
+        });
+      }
+      return prev.entries.length;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.diary(date) });
+      qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -57,7 +84,17 @@ export function Diary() {
           <h1 className="text-2xl font-bold text-slate-100">Diary</h1>
           <p className="text-sm text-slate-400">Log and review your day</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => copyYesterday.mutate()}
+            disabled={copyYesterday.isPending}
+            title="Copy yesterday's entries onto this day"
+          >
+            {copyYesterday.isPending ? <Spinner /> : <Copy className="h-4 w-4" />}
+            Copy yesterday
+          </Button>
           <Button variant="outline" size="icon" onClick={() => shiftDate(-1)} aria-label="Previous day">
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -72,6 +109,8 @@ export function Diary() {
           </Button>
         </div>
       </div>
+
+      {copyYesterday.isError ? <ErrorState error={copyYesterday.error} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Add food: Search | Describe | Barcode */}
