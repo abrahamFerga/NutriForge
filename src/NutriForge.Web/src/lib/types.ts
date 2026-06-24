@@ -454,6 +454,39 @@ export interface AdherencePoint {
   adherencePct: number;
 }
 
+// ---- Notifications (#95) ----
+
+export interface ChannelSubscription {
+  channel: string;
+  enabled: boolean;
+  sendHourUtc: number;
+  isLinked: boolean;
+  address: string | null;
+}
+
+export interface UpdateChannelSubscriptionRequest {
+  channel: string;
+  enabled: boolean;
+  sendHourUtc: number;
+}
+
+export interface LinkCode {
+  code: string;
+  expiresAt: string;
+}
+
+export interface ChannelMessageDto {
+  channel: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface DailySummaryResult {
+  sent: boolean;
+  channel: string;
+  message: string;
+}
+
 // ---- Batch-cook guide (#86) ----
 
 export interface BatchCookIngredient {

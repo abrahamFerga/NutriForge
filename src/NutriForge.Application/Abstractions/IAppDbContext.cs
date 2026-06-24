@@ -22,6 +22,8 @@ public interface IAppDbContext
     DbSet<ShoppingList> ShoppingLists { get; }
     DbSet<MealPlan> MealPlans { get; }
     DbSet<ChannelMessage> ChannelMessages { get; }
+    DbSet<ChannelSubscription> ChannelSubscriptions { get; }
+    DbSet<AccountLinkToken> AccountLinkTokens { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

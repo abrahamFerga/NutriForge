@@ -35,8 +35,37 @@ public static class NotificationEndpoints
             return Results.Ok(items);
         }).WithName("GetNotificationOutbox");
 
+        // The current user's subscription for a channel (defaults to telegram).
+        group.MapGet("/subscription", async (string? channel, ICurrentUser user, ChannelSubscriptionService subs, CancellationToken ct) =>
+            Results.Ok(await subs.GetAsync(user.CurrentUserId(), channel ?? "telegram", ct)))
+            .WithName("GetChannelSubscription");
+
+        // Set the opt-in toggle + daily send hour. The address is bound only via the link flow below.
+        group.MapPut("/subscription", async (UpdateChannelSubscriptionRequest req, ICurrentUser user, ChannelSubscriptionService subs, CancellationToken ct) =>
+            Results.Ok(await subs.UpsertAsync(user.CurrentUserId(), req, ct)))
+            .WithName("UpdateChannelSubscription");
+
+        // Mint a single-use, 15-min link code (returned once; only its hash is stored). The user sends
+        // it to the bot (real Telegram), or redeems it directly in dev via the endpoint below.
+        group.MapPost("/link", async (LinkRequest req, ICurrentUser user, ChannelSubscriptionService subs, CancellationToken ct) =>
+            Results.Ok(await subs.CreateLinkCodeAsync(user.CurrentUserId(), req?.Channel ?? "telegram", ct)))
+            .WithName("CreateChannelLinkCode");
+
+        // Redeem a link code to bind a channel address + enable the subscription. 422 on an invalid,
+        // expired, or already-used code (no detail, to avoid leaking which).
+        group.MapPost("/link/redeem", async (RedeemLinkRequest req, ICurrentUser user, ChannelSubscriptionService subs, CancellationToken ct) =>
+        {
+            var result = await subs.RedeemAsync(user.CurrentUserId(), req, ct);
+            return result.Linked
+                ? Results.Ok(result)
+                : Results.Problem(title: "Link failed", detail: "That code is invalid, expired, or already used.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity);
+        }).WithName("RedeemChannelLinkCode");
+
         return app;
     }
+
+    public sealed record LinkRequest(string? Channel);
 
     public sealed record ChannelMessageDto(string Channel, string Body, DateTimeOffset CreatedAt);
 }

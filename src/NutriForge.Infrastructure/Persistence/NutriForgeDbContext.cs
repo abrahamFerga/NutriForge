@@ -47,6 +47,8 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
     public DbSet<Domain.Notifications.ChannelMessage> ChannelMessages => Set<Domain.Notifications.ChannelMessage>();
+    public DbSet<Domain.Notifications.ChannelSubscription> ChannelSubscriptions => Set<Domain.Notifications.ChannelSubscription>();
+    public DbSet<Domain.Notifications.AccountLinkToken> AccountLinkTokens => Set<Domain.Notifications.AccountLinkToken>();
 
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
@@ -275,6 +277,28 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(m => m.Body).HasMaxLength(2000);
             e.HasIndex(m => new { m.UserId, m.CreatedAt });
             e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        b.Entity<Domain.Notifications.ChannelSubscription>(e =>
+        {
+            e.ToTable("channel_subscriptions", "app");
+            e.HasKey(s => s.Id);
+            e.Property(s => s.Channel).HasMaxLength(20).IsRequired();
+            e.Property(s => s.Address).HasMaxLength(128);
+            // One subscription per channel per user.
+            e.HasIndex(s => new { s.UserId, s.Channel }).IsUnique();
+            e.HasQueryFilter(s => s.UserId == CurrentUserId);
+        });
+
+        b.Entity<Domain.Notifications.AccountLinkToken>(e =>
+        {
+            e.ToTable("account_link_tokens", "app");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Channel).HasMaxLength(20).IsRequired();
+            e.Property(t => t.TokenHash).HasMaxLength(64).IsRequired();
+            // Redeemed by hash lookup; unique so a hash collision can't shadow another user's link.
+            e.HasIndex(t => t.TokenHash).IsUnique();
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
         });
 
         // ---- Operational infra ----

@@ -1,7 +1,12 @@
 import type {
   AdherencePoint,
   BatchCookPlanDto,
+  ChannelMessageDto,
+  ChannelSubscription,
   CreateDiaryEntryRequest,
+  DailySummaryResult,
+  LinkCode,
+  UpdateChannelSubscriptionRequest,
   CreateDietPlanRequest,
   CreateFoodRequest,
   CreatePantryItemRequest,
@@ -435,6 +440,45 @@ export const dietPlansApi = {
       );
     }
     return response.blob();
+  },
+};
+
+// ---- Notifications (#95) ----
+
+export const notificationsApi = {
+  getSubscription(channel = "telegram"): Promise<ChannelSubscription> {
+    return request<ChannelSubscription>(
+      `/api/v1/notifications/subscription?channel=${encodeURIComponent(channel)}`,
+    );
+  },
+  updateSubscription(
+    body: UpdateChannelSubscriptionRequest,
+  ): Promise<ChannelSubscription> {
+    return request<ChannelSubscription>("/api/v1/notifications/subscription", {
+      method: "PUT",
+      body,
+    });
+  },
+  createLink(channel = "telegram"): Promise<LinkCode> {
+    return request<LinkCode>("/api/v1/notifications/link", {
+      method: "POST",
+      body: { channel },
+    });
+  },
+  redeem(code: string, address: string): Promise<{ linked: boolean }> {
+    return request<{ linked: boolean }>("/api/v1/notifications/link/redeem", {
+      method: "POST",
+      body: { code, address },
+    });
+  },
+  sendNow(): Promise<DailySummaryResult> {
+    return request<DailySummaryResult>("/api/v1/notifications/daily-summary", {
+      method: "POST",
+      body: {},
+    });
+  },
+  outbox(): Promise<ChannelMessageDto[]> {
+    return request<ChannelMessageDto[]>("/api/v1/notifications/outbox");
   },
 };
 

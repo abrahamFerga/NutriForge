@@ -342,6 +342,54 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(message, outbox[0].GetProperty("body").GetString());
     }
 
+    /// <summary>Notification opt-in + the secure account-link flow (#95): subscribe, mint a code, redeem it once.</summary>
+    [Fact]
+    public async Task Channel_subscription_and_secure_account_linking_round_trip()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"sub-{Guid.NewGuid():N}");
+
+        // Opt in + set the daily send hour.
+        using (var put = await client.PutAsJsonAsync("/api/v1/notifications/subscription",
+            new { channel = "telegram", enabled = true, sendHourUtc = 9 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+            var dto = await put.Content.ReadFromJsonAsync<JsonElement>(Json);
+            Assert.True(dto.GetProperty("enabled").GetBoolean());
+            Assert.Equal(9, dto.GetProperty("sendHourUtc").GetInt32());
+            Assert.False(dto.GetProperty("isLinked").GetBoolean());
+        }
+
+        // Mint a one-time link code.
+        using var linkRes = await client.PostAsJsonAsync("/api/v1/notifications/link", new { channel = "telegram" }, Json);
+        Assert.Equal(HttpStatusCode.OK, linkRes.StatusCode);
+        var code = (await linkRes.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("code").GetString()!;
+        Assert.False(string.IsNullOrWhiteSpace(code));
+
+        // Redeem it → the subscription is now linked.
+        using (var redeem = await client.PostAsJsonAsync("/api/v1/notifications/link/redeem",
+            new { code, address = "chat-42" }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, redeem.StatusCode);
+            Assert.True((await redeem.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("linked").GetBoolean());
+        }
+
+        var sub = await client.GetFromJsonAsync<JsonElement>("/api/v1/notifications/subscription?channel=telegram", Json);
+        Assert.True(sub.GetProperty("isLinked").GetBoolean());
+        Assert.Equal("chat-42", sub.GetProperty("address").GetString());
+
+        // Single-use: redeeming the same code again is rejected (422).
+        using (var again = await client.PostAsJsonAsync("/api/v1/notifications/link/redeem",
+            new { code, address = "chat-99" }, Json))
+        {
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, again.StatusCode);
+        }
+
+        // A bogus code is rejected too.
+        using var bad = await client.PostAsJsonAsync("/api/v1/notifications/link/redeem",
+            new { code = "not-a-real-code", address = "chat-1" }, Json);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, bad.StatusCode);
+    }
+
     /// <summary>The meal-prep PDF export renders a real PDF for a ready plan.</summary>
     [Fact]
     public async Task Diet_plan_pdf_export_returns_a_valid_pdf()

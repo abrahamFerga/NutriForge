@@ -25,9 +25,11 @@ public static class DependencyInjection
         services.AddScoped<DietGen.DietPlanGenerator>();
         services.AddScoped<DietGen.DietPlanService>();
 
-        // Notifications: the daily-summary builder + the channel (mock by default; swappable later).
+        // Notifications: the daily-summary builder + the channel (mock by default; swappable later) +
+        // the opt-in subscription / secure account-link service.
         services.AddScoped<Notifications.INotificationChannel, Notifications.MockChannel>();
         services.AddScoped<Notifications.DailySummaryService>();
+        services.AddScoped<Notifications.ChannelSubscriptionService>();
 
         services.AddValidatorsFromAssemblyContaining<SubmitFoodRequestValidator>(ServiceLifetime.Singleton);
 
