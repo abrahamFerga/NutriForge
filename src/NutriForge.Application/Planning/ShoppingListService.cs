@@ -29,6 +29,23 @@ public sealed class ShoppingListService(IAppDbContext db, ICatalogDbContext cata
     public async Task<ShoppingListDto> GenerateAsync(
         Guid userId, IReadOnlyList<ShoppingRecipeLine> lines, Guid? mealPlanId, CancellationToken ct = default)
     {
+        var list = await BuildAsync(userId, lines, mealPlanId, ct).ConfigureAwait(false);
+        db.ShoppingLists.Add(list);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return ToDto(list);
+    }
+
+    /// <summary>Consolidate the list WITHOUT persisting it — e.g. to render a PDF or preview.</summary>
+    public async Task<ShoppingListDto> ComputeAsync(
+        Guid userId, IReadOnlyList<ShoppingRecipeLine> lines, Guid? mealPlanId = null, CancellationToken ct = default)
+    {
+        var list = await BuildAsync(userId, lines, mealPlanId, ct).ConfigureAwait(false);
+        return ToDto(list);
+    }
+
+    private async Task<ShoppingList> BuildAsync(
+        Guid userId, IReadOnlyList<ShoppingRecipeLine> lines, Guid? mealPlanId, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(lines);
 
         var recipeIds = lines.Select(l => l.RecipeId).ToHashSet();
@@ -84,9 +101,7 @@ public sealed class ShoppingListService(IAppDbContext db, ICatalogDbContext cata
             });
         }
 
-        db.ShoppingLists.Add(list);
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return ToDto(list);
+        return list;
     }
 
     public async Task<ShoppingListDto?> GetAsync(Guid userId, Guid id, CancellationToken ct = default)

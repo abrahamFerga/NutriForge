@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Check,
   ChefHat,
+  FileDown,
   ShoppingCart,
   Sparkles,
 } from "lucide-react";
@@ -320,6 +321,20 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
     onSuccess: (list) => setShoppingList(list),
   });
 
+  const downloadPdf = useMutation({
+    mutationFn: () => dietPlansApi.pdf(plan.id),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "nutriforge-meal-plan.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
+  });
+
   const adherence = useQuery({
     queryKey: queryKeys.dietPlanAdherence(plan.id),
     queryFn: () => dietPlansApi.adherence(plan.id),
@@ -371,6 +386,7 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
 
           {accept.isError ? <ErrorState error={accept.error} /> : null}
           {genList.isError ? <ErrorState error={genList.error} /> : null}
+          {downloadPdf.isError ? <ErrorState error={downloadPdf.error} /> : null}
 
           <div className="flex flex-wrap gap-2">
             {!isAccepted ? (
@@ -390,6 +406,14 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
                 <ShoppingCart className="h-4 w-4" />
               )}
               Generate shopping list
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => downloadPdf.mutate()}
+              disabled={downloadPdf.isPending}
+            >
+              {downloadPdf.isPending ? <Spinner /> : <FileDown className="h-4 w-4" />}
+              Download PDF
             </Button>
           </div>
         </CardContent>

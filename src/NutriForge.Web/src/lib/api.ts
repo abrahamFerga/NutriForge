@@ -306,6 +306,25 @@ export const dietPlansApi = {
       `/api/v1/diet-plans/${encodeURIComponent(id)}/adherence`,
     );
   },
+  /** Fetches the printable meal-prep PDF as a Blob (dev-auth headers can't ride a plain link). */
+  async pdf(id: string): Promise<Blob> {
+    const headers = new Headers();
+    headers.set("X-Debug-Subject", "demo-user");
+    headers.set("X-Debug-Role", "user");
+    headers.set("Accept", "application/pdf");
+
+    const response = await fetch(
+      buildUrl(`/api/v1/diet-plans/${encodeURIComponent(id)}/pdf`),
+      { headers },
+    );
+    if (!response.ok) {
+      throw new ApiError(
+        `Failed to generate PDF (${response.status} ${response.statusText})`,
+        response.status,
+      );
+    }
+    return response.blob();
+  },
 };
 
 // ---- Assistant (MAF NutritionAssistant) ----

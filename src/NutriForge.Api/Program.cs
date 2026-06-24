@@ -11,6 +11,9 @@ using NutriForge.Infrastructure.OpenFoodFacts;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// QuestPDF Community licence (free for OSS / small orgs) — required before any PDF is generated.
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
 // OpenTelemetry + health checks + service discovery + HTTP resilience.
 builder.AddServiceDefaults();
 

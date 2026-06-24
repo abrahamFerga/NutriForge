@@ -143,17 +143,35 @@ public sealed class DietPlanService(
             return null;
         }
 
-        // The ONLY place Eaters touches quantities: scale each recipe's total per-eater servings by
-        // the people-count. ShoppingListService then expands grams from this, so multiplying here once
-        // yields exactly Eaters× the single-eater list. Eaters is NOT passed into ShoppingListService —
-        // double-applying it (here AND there) would 4× the groceries.
-        var lines = plan.Slots
+        return await shopping.GenerateAsync(userId, BuildShoppingLines(plan), mealPlanId: plan.Id, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The plan plus its consolidated (un-persisted) shopping list — for the PDF/meal-prep export.</summary>
+    public async Task<(DietPlanDto Plan, ShoppingListDto Shopping)?> GetPlanWithShoppingAsync(
+        Guid userId, Guid id, CancellationToken ct = default)
+    {
+        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots)
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
+        if (plan is null || plan.Slots.Count == 0)
+        {
+            return null;
+        }
+
+        var shoppingDto = await shopping.ComputeAsync(userId, BuildShoppingLines(plan), mealPlanId: plan.Id, ct).ConfigureAwait(false);
+        return (ToDto(plan), shoppingDto);
+    }
+
+    /// <summary>
+    /// Group the plan's slots into per-recipe shopping lines, scaled by <see cref="MealPlan.Eaters"/>.
+    /// This is the ONLY place the people-count touches quantities: ShoppingListService expands grams
+    /// from these servings, so multiplying once here yields exactly Eaters× the single-eater list.
+    /// Eaters is NEVER also passed into ShoppingListService (that would 4× the groceries).
+    /// </summary>
+    private static List<ShoppingRecipeLine> BuildShoppingLines(MealPlan plan) =>
+        plan.Slots
             .GroupBy(s => s.RecipeId)
             .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings) * plan.Eaters))
             .ToList();
-
-        return await shopping.GenerateAsync(userId, lines, mealPlanId: plan.Id, ct).ConfigureAwait(false);
-    }
 
     /// <summary>Closed loop: how closely logged intake tracked the plan's daily target over the last week.</summary>
     public async Task<IReadOnlyList<AdherenceDto>> AdherenceAsync(Guid userId, Guid id, CancellationToken ct = default)

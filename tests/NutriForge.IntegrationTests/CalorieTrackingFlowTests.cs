@@ -319,6 +319,23 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(2, two.GetProperty("eaters").GetInt32());
     }
 
+    /// <summary>The meal-prep PDF export renders a real PDF for a ready plan.</summary>
+    [Fact]
+    public async Task Diet_plan_pdf_export_returns_a_valid_pdf()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"pdf-{Guid.NewGuid():N}");
+        var plan = await CreateReadyPlanAsync(client, eaters: 2);
+
+        using var res = await client.GetAsync($"/api/v1/diet-plans/{plan.GetProperty("id").GetString()}/pdf");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("application/pdf", res.Content.Headers.ContentType?.MediaType);
+
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        Assert.True(bytes.Length > 500, "expected a non-trivial PDF");
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4)); // PDF magic number
+    }
+
     /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>
     private static async Task<JsonElement> CreateReadyPlanAsync(HttpClient client, int? eaters, int days = 3)
     {
