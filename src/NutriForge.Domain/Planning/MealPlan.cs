@@ -31,7 +31,16 @@ public sealed class MealPlan : IUserOwned, IAuditable, ITimestamped
     public int HorizonDays { get; set; } = 7;
     public double TargetKcal { get; set; }
 
-    // Achieved daily-average nutrition once generated (computed, not LLM-sourced).
+    /// <summary>
+    /// Number of people this plan is cooked and shopped for (default 1). This is a pure DOWNSTREAM
+    /// multiplier: it scales the consolidated shopping list and the displayed cook totals only. It
+    /// MUST NEVER enter generation — the generator targets ONE eater's daily kcal/macros, so
+    /// <see cref="TargetKcal"/>, every <see cref="PlanSlot.Servings"/>, and the <c>Achieved*</c>
+    /// daily averages all stay strictly per-eater. The application layer clamps this to [1, 9].
+    /// </summary>
+    public int Eaters { get; set; } = 1;
+
+    // Achieved daily-average nutrition once generated, PER EATER (computed, not LLM-sourced).
     public double AchievedKcal { get; set; }
     public double AchievedProteinG { get; set; }
     public double AchievedFatG { get; set; }

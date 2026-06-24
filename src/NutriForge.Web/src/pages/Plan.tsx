@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Check,
   ChefHat,
+  FileDown,
   ShoppingCart,
   Sparkles,
 } from "lucide-react";
@@ -80,12 +81,14 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [kcalTarget, setKcalTarget] = useState("");
   const [maxPrep, setMaxPrep] = useState("");
   const [days, setDays] = useState("7");
+  const [eaters, setEaters] = useState("1");
   const [desire, setDesire] = useState("");
 
   const create = useMutation({
     mutationFn: () => {
       const body: CreateDietPlanRequest = {
         horizonDays: Number(days) || 7,
+        eaters: Math.min(9, Math.max(1, Number(eaters) || 1)),
       };
       if (dietSlug) body.dietSlug = dietSlug;
       if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
@@ -142,16 +145,30 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
           </div>
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="days">Days</Label>
-          <Input
-            id="days"
-            type="number"
-            min={1}
-            max={30}
-            value={days}
-            onChange={(e) => setDays(e.target.value)}
-          />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="days">Days</Label>
+            <Input
+              id="days"
+              type="number"
+              min={1}
+              max={30}
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="eaters">People</Label>
+            <Input
+              id="eaters"
+              type="number"
+              min={1}
+              max={9}
+              value={eaters}
+              onChange={(e) => setEaters(e.target.value)}
+            />
+            <p className="text-xs text-slate-500">Cook &amp; shop for this many.</p>
+          </div>
         </div>
 
         <div className="space-y-1">
@@ -287,7 +304,10 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
 
   const days = useMemo(() => groupByDay(plan.slots), [plan.slots]);
   const dayCount = days.length;
-  const avgKcal = dayCount > 0 ? plan.achievedKcal / dayCount : plan.achievedKcal;
+  const eaters = plan.eaters ?? 1;
+  // achieved* are already PER-EATER, PER-DAY averages from the server. Show them as-is: do NOT
+  // divide by dayCount again (that was a bug — it showed ~target/days), and NEVER multiply by
+  // eaters (these describe one person's day; only cook totals + the shopping list scale by people).
 
   const accept = useMutation({
     mutationFn: () => dietPlansApi.accept(plan.id),
@@ -299,6 +319,20 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
   const genList = useMutation({
     mutationFn: () => dietPlansApi.shoppingList(plan.id),
     onSuccess: (list) => setShoppingList(list),
+  });
+
+  const downloadPdf = useMutation({
+    mutationFn: () => dietPlansApi.pdf(plan.id),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "nutriforge-meal-plan.pdf";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
   });
 
   const adherence = useQuery({
@@ -323,24 +357,25 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">
+              Per person · per day
+            </p>
+            {eaters > 1 ? (
+              <span className="rounded bg-brand-500/15 px-2 py-0.5 text-xs font-medium text-brand-300">
+                {eaters} people
+              </span>
+            ) : null}
+          </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat
               label="Daily avg kcal"
-              value={round(avgKcal)}
+              value={round(plan.achievedKcal)}
               sub={`target ${round(plan.targetKcal)}`}
             />
-            <Stat
-              label="Protein/day"
-              value={`${round(plan.achievedProteinG / Math.max(dayCount, 1))}g`}
-            />
-            <Stat
-              label="Fat/day"
-              value={`${round(plan.achievedFatG / Math.max(dayCount, 1))}g`}
-            />
-            <Stat
-              label="Carbs/day"
-              value={`${round(plan.achievedCarbG / Math.max(dayCount, 1))}g`}
-            />
+            <Stat label="Protein/day" value={`${round(plan.achievedProteinG)}g`} />
+            <Stat label="Fat/day" value={`${round(plan.achievedFatG)}g`} />
+            <Stat label="Carbs/day" value={`${round(plan.achievedCarbG)}g`} />
           </div>
 
           {plan.message ? (
@@ -351,6 +386,7 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
 
           {accept.isError ? <ErrorState error={accept.error} /> : null}
           {genList.isError ? <ErrorState error={genList.error} /> : null}
+          {downloadPdf.isError ? <ErrorState error={downloadPdf.error} /> : null}
 
           <div className="flex flex-wrap gap-2">
             {!isAccepted ? (
@@ -371,6 +407,14 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
               )}
               Generate shopping list
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => downloadPdf.mutate()}
+              disabled={downloadPdf.isPending}
+            >
+              {downloadPdf.isPending ? <Spinner /> : <FileDown className="h-4 w-4" />}
+              Download PDF
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -385,7 +429,7 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
               <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">
                 Day {day}
               </h3>
-              <div className="overflow-hidden rounded-lg border border-slate-800">
+              <div className="overflow-x-auto rounded-lg border border-slate-800">
                 <table className="w-full text-sm">
                   <tbody className="divide-y divide-slate-800">
                     {slots.map((slot, i) => (
@@ -401,6 +445,10 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
                           <span className="text-xs text-slate-500">
                             {round(slot.servings, 2)} serving
                             {slot.servings === 1 ? "" : "s"}
+                            {eaters > 1 ? "/person" : ""}
+                            {eaters > 1
+                              ? ` · cook ${round(slot.servings * eaters, 2)} total`
+                              : ""}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-right whitespace-nowrap text-slate-300">
@@ -423,6 +471,11 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
         <Card>
           <CardHeader>
             <CardTitle>Shopping list</CardTitle>
+            <p className="text-xs text-slate-500">
+              Totals for {dayCount} {dayCount === 1 ? "day" : "days"} ×{" "}
+              {eaters} {eaters === 1 ? "person" : "people"} ={" "}
+              {dayCount * eaters} person-days
+            </p>
           </CardHeader>
           <CardContent>
             <ShoppingList list={shoppingList} />
@@ -462,7 +515,7 @@ function AdherenceReadout({ points }: { points: AdherencePoint[] }) {
     );
   }
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-800">
+    <div className="overflow-x-auto rounded-lg border border-slate-800">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-xs text-slate-500">

@@ -341,10 +341,13 @@ export interface DietPlanDto {
   id: string;
   status: DietPlanStatus;
   targetKcal: number;
+  /** Per-eater daily averages — never multiply these by `eaters` in the UI. */
   achievedKcal: number;
   achievedProteinG: number;
   achievedFatG: number;
   achievedCarbG: number;
+  /** People the plan is cooked/shopped for. Scales cook totals + the shopping list only. */
+  eaters: number;
   message: string | null;
   slots: DietPlanSlot[];
 }
@@ -360,6 +363,8 @@ export interface CreateDietPlanRequest {
   maxPrepMinutes?: number;
   mealsPerDay?: number;
   horizonDays?: number;
+  /** Number of people to cook/shop for (default 1). */
+  eaters?: number;
 }
 
 export interface AdherencePoint {

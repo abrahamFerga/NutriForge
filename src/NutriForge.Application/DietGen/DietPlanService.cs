@@ -60,6 +60,9 @@ public sealed class DietPlanService(
             IntentJson = JsonSerializer.Serialize(intent, Json),
             HorizonDays = intent.HorizonDays,
             TargetKcal = intent.KcalTarget ?? kcalTarget,
+            // Clamp the people-count to a sane [1, 9] in ONE place. Deliberately NOT fed into `intent`
+            // or `kcalTarget` above — generation stays per-eater; Eaters only scales the shopping list.
+            Eaters = Math.Clamp(req.Eaters ?? 1, 1, 9),
         };
 
         // Run the deterministic pipeline now (it's fast) so the 202 poll returns a finished plan.
@@ -75,8 +78,10 @@ public sealed class DietPlanService(
     /// <summary>Run FILTER → SELECT → VERIFY → REPAIR over the catalog pool and finish the plan.</summary>
     private async Task FinishGenerationAsync(MealPlan plan, DietIntent intent, CancellationToken ct)
     {
+        // Order by Id so the greedy round-robin pool is stable: same inputs ⇒ same plan (deterministic
+        // generation, independent of DB heap order). Eaters never enters here.
         var recipes = await catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
-            .Where(r => r.IsNutritionComputed).ToListAsync(ct).ConfigureAwait(false);
+            .Where(r => r.IsNutritionComputed).OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false);
         var diet = string.IsNullOrEmpty(intent.DietSlug)
             ? null
             : await catalog.DietTypes.AsNoTracking().FirstOrDefaultAsync(d => d.Slug == intent.DietSlug, ct).ConfigureAwait(false);
@@ -138,13 +143,35 @@ public sealed class DietPlanService(
             return null;
         }
 
-        var lines = plan.Slots
-            .GroupBy(s => s.RecipeId)
-            .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings)))
-            .ToList();
-
-        return await shopping.GenerateAsync(userId, lines, mealPlanId: plan.Id, ct).ConfigureAwait(false);
+        return await shopping.GenerateAsync(userId, BuildShoppingLines(plan), mealPlanId: plan.Id, ct).ConfigureAwait(false);
     }
+
+    /// <summary>The plan plus its consolidated (un-persisted) shopping list — for the PDF/meal-prep export.</summary>
+    public async Task<(DietPlanDto Plan, ShoppingListDto Shopping)?> GetPlanWithShoppingAsync(
+        Guid userId, Guid id, CancellationToken ct = default)
+    {
+        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots)
+            .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
+        if (plan is null || plan.Slots.Count == 0)
+        {
+            return null;
+        }
+
+        var shoppingDto = await shopping.ComputeAsync(userId, BuildShoppingLines(plan), mealPlanId: plan.Id, ct).ConfigureAwait(false);
+        return (ToDto(plan), shoppingDto);
+    }
+
+    /// <summary>
+    /// Group the plan's slots into per-recipe shopping lines, scaled by <see cref="MealPlan.Eaters"/>.
+    /// This is the ONLY place the people-count touches quantities: ShoppingListService expands grams
+    /// from these servings, so multiplying once here yields exactly Eaters× the single-eater list.
+    /// Eaters is NEVER also passed into ShoppingListService (that would 4× the groceries).
+    /// </summary>
+    private static List<ShoppingRecipeLine> BuildShoppingLines(MealPlan plan) =>
+        plan.Slots
+            .GroupBy(s => s.RecipeId)
+            .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings) * plan.Eaters))
+            .ToList();
 
     /// <summary>Closed loop: how closely logged intake tracked the plan's daily target over the last week.</summary>
     public async Task<IReadOnlyList<AdherenceDto>> AdherenceAsync(Guid userId, Guid id, CancellationToken ct = default)
@@ -177,7 +204,7 @@ public sealed class DietPlanService(
 
     private static DietPlanDto ToDto(MealPlan p) => new(
         p.Id, p.Status.ToString(), p.TargetKcal,
-        p.AchievedKcal, p.AchievedProteinG, p.AchievedFatG, p.AchievedCarbG, p.Message,
+        p.AchievedKcal, p.AchievedProteinG, p.AchievedFatG, p.AchievedCarbG, p.Eaters, p.Message,
         p.Slots.OrderBy(s => s.Day).ThenBy(s => s.MealSlot)
             .Select(s => new PlanSlotDto(s.Day, s.MealSlot.ToString(), s.RecipeId, s.RecipeName, s.Servings,
                 s.Kcal, s.ProteinG, s.FatG, s.CarbG)).ToList());

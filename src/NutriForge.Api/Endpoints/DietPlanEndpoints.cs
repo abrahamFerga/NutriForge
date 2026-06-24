@@ -52,6 +52,19 @@ public static class DietPlanEndpoints
             Results.Ok(await plans.AdherenceAsync(user.CurrentUserId(), id, ct)))
             .WithName("DietPlanAdherence");
 
+        // Printable meal-prep sheet: per-person/day meals + the days×people consolidated shopping list.
+        group.MapGet("/{id:guid}/pdf", async (Guid id, ICurrentUser user, DietPlanService plans, CancellationToken ct) =>
+        {
+            var data = await plans.GetPlanWithShoppingAsync(user.CurrentUserId(), id, ct);
+            if (data is null)
+            {
+                return Results.NotFound();
+            }
+
+            var bytes = Pdf.MealPlanPdf.Render(data.Value.Plan, data.Value.Shopping);
+            return Results.File(bytes, "application/pdf", "nutriforge-meal-plan.pdf");
+        }).WithName("DietPlanPdf");
+
         return app;
     }
 }
