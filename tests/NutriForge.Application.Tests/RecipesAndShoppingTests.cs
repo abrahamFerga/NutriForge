@@ -30,14 +30,15 @@ public sealed class RecipesAndShoppingTests
     [Fact]
     public async Task Recipe_nutrition_is_computed_from_resolved_ingredients()
     {
-        await using var db = TestDb.New(Guid.NewGuid());
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
         SeedFoodAndIngredient(db, "rice", "Pantry", 130, 2.7, 0.3, 28.2);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var recipes = new RecipeService(db);
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
         var recipe = await recipes.CreateAsync(new CreateRecipeRequest(
             "Rice bowl", Servings: 2, TotalMinutes: 10, Instructions: null, Tags: ["dinner"],
-            Ingredients: [new RecipeIngredientInput(300, "g", "rice")]));
+            Ingredients: [new RecipeIngredientInput(300, "g", "rice")]), ownerUserId: userId);
 
         // 300 g rice @ 130 kcal/100g = 390 kcal total → 195 per serving (2 servings), computed by code.
         Assert.True(recipe.IsNutritionComputed);
@@ -53,11 +54,11 @@ public sealed class RecipesAndShoppingTests
         SeedFoodAndIngredient(db, "chicken", "Meat & Seafood", 120, 22.5, 2.6, 0);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var recipes = new RecipeService(db);
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
         var bowl = await recipes.CreateAsync(new CreateRecipeRequest("Rice bowl", 2, 10, null, ["dinner"],
-            [new RecipeIngredientInput(300, "g", "rice")]));
+            [new RecipeIngredientInput(300, "g", "rice")]), ownerUserId: userId);
         var chickenRice = await recipes.CreateAsync(new CreateRecipeRequest("Chicken & rice", 2, 20, null, ["dinner"],
-            [new RecipeIngredientInput(200, "g", "rice"), new RecipeIngredientInput(300, "g", "chicken")]));
+            [new RecipeIngredientInput(200, "g", "rice"), new RecipeIngredientInput(300, "g", "chicken")]), ownerUserId: userId);
 
         // Already have 100 g of rice on hand.
         db.PantryItems.Add(new PantryItem { UserId = userId, IngredientId = rice.Id, IngredientName = "rice", Grams = 100 });

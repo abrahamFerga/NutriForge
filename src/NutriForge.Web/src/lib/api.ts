@@ -38,6 +38,33 @@ const RAW_BASE = import.meta.env.VITE_API_BASE;
 export const API_BASE: string =
   RAW_BASE === undefined ? "http://localhost:5000" : RAW_BASE;
 
+/**
+ * Dev-auth role toggle. The dev-auth scheme sends `X-Debug-Role`; real auth (B2C/custom) will replace
+ * this. Persisted in localStorage so an operator can act as an admin (e.g. to curate global recipes)
+ * without a separate login. Defaults to "user".
+ */
+const DEV_ROLE_KEY = "nf-debug-role";
+
+export function getDevRole(): "user" | "admin" {
+  try {
+    return localStorage.getItem(DEV_ROLE_KEY) === "admin" ? "admin" : "user";
+  } catch {
+    return "user";
+  }
+}
+
+export function setDevRole(role: "user" | "admin"): void {
+  try {
+    localStorage.setItem(DEV_ROLE_KEY, role);
+  } catch {
+    /* localStorage unavailable — ignore */
+  }
+}
+
+export function isAdmin(): boolean {
+  return getDevRole() === "admin";
+}
+
 // RFC9457 problem+json shape (partial).
 interface ProblemDetails {
   title?: string;
@@ -76,7 +103,7 @@ function buildHeaders(method: string, hasBody: boolean): Headers {
   const headers = new Headers();
   // Dev-auth scheme — sent on every request for local development.
   headers.set("X-Debug-Subject", "demo-user");
-  headers.set("X-Debug-Role", "user");
+  headers.set("X-Debug-Role", getDevRole());
   headers.set("Accept", "application/json");
 
   if (hasBody) {
@@ -236,7 +263,7 @@ export const diaryApi = {
   ): Promise<PhotoAnalysisResult> {
     const headers = new Headers();
     headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", "user");
+    headers.set("X-Debug-Role", getDevRole());
     headers.set("Accept", "application/json");
     headers.set("Idempotency-Key", crypto.randomUUID());
     // No Content-Type: the browser sets the multipart boundary for FormData.
@@ -285,6 +312,24 @@ export const recipesApi = {
   },
   create(body: CreateRecipeRequest): Promise<RecipeDto> {
     return request<RecipeDto>("/api/v1/recipes", { method: "POST", body });
+  },
+  update(id: string, body: CreateRecipeRequest): Promise<RecipeDto> {
+    return request<RecipeDto>(`/api/v1/recipes/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/recipes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+  /** Admin-only: promote a recipe to the shared global catalog. Throws 403 (not admin) / 409 (clash). */
+  promoteGlobal(id: string): Promise<RecipeDto> {
+    return request<RecipeDto>(
+      `/api/v1/recipes/${encodeURIComponent(id)}/promote-global`,
+      { method: "POST", body: {} },
+    );
   },
   scale(id: string, servings: number): Promise<RecipeScaleDto> {
     return request<RecipeScaleDto>(
@@ -369,7 +414,7 @@ export const dietPlansApi = {
   async pdf(id: string): Promise<Blob> {
     const headers = new Headers();
     headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", "user");
+    headers.set("X-Debug-Role", getDevRole());
     headers.set("Accept", "application/pdf");
 
     const response = await fetch(
@@ -420,7 +465,7 @@ export const assistantApi = {
   ): Promise<void> {
     const headers = new Headers();
     headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", "user");
+    headers.set("X-Debug-Role", getDevRole());
     headers.set("Content-Type", "application/json");
     headers.set("Accept", "text/event-stream");
     headers.set("Idempotency-Key", crypto.randomUUID());

@@ -14,6 +14,7 @@ namespace NutriForge.IntegrationTests;
 public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly string[] HighProteinDinnerTags = ["high-protein", "dinner"];
 
     [Fact]
     public async Task Health_endpoint_is_green()
@@ -462,6 +463,220 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal("You", members[0].GetProperty("name").GetString());
         Assert.Equal(1.0, members[0].GetProperty("portionFactor").GetDouble(), 3);
         Assert.Equal(0.75, members[1].GetProperty("portionFactor").GetDouble(), 3);
+    }
+
+    // -------------------- Recipe ownership (global vs per-user) --------------------
+
+    /// <summary>A user's recipe is private: visible to them, invisible (404) to everyone else.</summary>
+    [Fact]
+    public async Task A_users_recipe_is_private_and_invisible_to_other_users()
+    {
+        var alice = await fixture.CreateReadyClientAsync(subject: $"own-alice-{Guid.NewGuid():N}");
+        var bob = await fixture.CreateReadyClientAsync(subject: $"own-bob-{Guid.NewGuid():N}");
+
+        var recipe = await CreateRecipeAsync(alice, "Alice secret bowl");
+        var id = recipe.GetProperty("id").GetString()!;
+        Assert.False(recipe.GetProperty("isGlobal").GetBoolean());
+        Assert.True(recipe.GetProperty("isMine").GetBoolean());
+
+        // Alice sees it; Bob can't GET it and it's absent from his list.
+        using (var mine = await alice.GetAsync($"/api/v1/recipes/{id}"))
+        {
+            Assert.Equal(HttpStatusCode.OK, mine.StatusCode);
+        }
+
+        using (var theirs = await bob.GetAsync($"/api/v1/recipes/{id}"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, theirs.StatusCode);
+        }
+
+        var bobList = await bob.GetFromJsonAsync<JsonElement>("/api/v1/recipes", Json);
+        Assert.DoesNotContain(bobList.EnumerateArray(), r => r.GetProperty("id").GetString() == id);
+    }
+
+    /// <summary>Seeded recipes are global — every user sees them, flagged isGlobal.</summary>
+    [Fact]
+    public async Task Seeded_recipes_are_global_and_visible_to_everyone()
+    {
+        var alice = await fixture.CreateReadyClientAsync(subject: $"glob-alice-{Guid.NewGuid():N}");
+        var bob = await fixture.CreateReadyClientAsync(subject: $"glob-bob-{Guid.NewGuid():N}");
+
+        var aliceList = await alice.GetFromJsonAsync<JsonElement>("/api/v1/recipes", Json);
+        var bobList = await bob.GetFromJsonAsync<JsonElement>("/api/v1/recipes", Json);
+
+        Assert.True(aliceList.GetArrayLength() > 0, "the dev seeder provides global recipes");
+        Assert.All(aliceList.EnumerateArray(), r => Assert.True(r.GetProperty("isGlobal").GetBoolean()));
+        // Two fresh users (no private recipes) see the SAME global catalog, by id.
+        var aliceIds = aliceList.EnumerateArray().Select(r => r.GetProperty("id").GetString()).ToHashSet();
+        var bobIds = bobList.EnumerateArray().Select(r => r.GetProperty("id").GetString()).ToHashSet();
+        Assert.Equal(aliceIds, bobIds);
+    }
+
+    /// <summary>The Global intent flag is ignored for a non-admin: their recipe is still private.</summary>
+    [Fact]
+    public async Task Non_admin_cannot_create_a_global_recipe()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"noglob-{Guid.NewGuid():N}", role: "user");
+        var recipe = await CreateRecipeAsync(client, "Sneaky global attempt", global: true);
+
+        Assert.False(recipe.GetProperty("isGlobal").GetBoolean());
+        Assert.True(recipe.GetProperty("isMine").GetBoolean());
+    }
+
+    /// <summary>An admin creates a real global recipe that other users can see.</summary>
+    [Fact]
+    public async Task Admin_can_create_a_global_recipe_visible_to_others()
+    {
+        var admin = await fixture.CreateReadyClientAsync(subject: $"adm-{Guid.NewGuid():N}", role: "admin");
+        var other = await fixture.CreateReadyClientAsync(subject: $"adm-other-{Guid.NewGuid():N}");
+
+        var recipe = await CreateRecipeAsync(admin, "Admin global bowl", global: true);
+        var id = recipe.GetProperty("id").GetString()!;
+        Assert.True(recipe.GetProperty("isGlobal").GetBoolean());
+
+        using var seen = await other.GetAsync($"/api/v1/recipes/{id}");
+        Assert.Equal(HttpStatusCode.OK, seen.StatusCode);
+        var dto = await seen.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.True(dto.GetProperty("isGlobal").GetBoolean());
+        Assert.False(dto.GetProperty("isMine").GetBoolean()); // a global recipe is nobody's "mine"
+    }
+
+    /// <summary>A non-admin may not edit or delete a global (admin-curated) recipe — 403, not silent success.</summary>
+    [Fact]
+    public async Task Non_admin_cannot_edit_or_delete_a_global_recipe()
+    {
+        var admin = await fixture.CreateReadyClientAsync(subject: $"gedit-adm-{Guid.NewGuid():N}", role: "admin");
+        var user = await fixture.CreateReadyClientAsync(subject: $"gedit-usr-{Guid.NewGuid():N}", role: "user");
+
+        var global = await CreateRecipeAsync(admin, "Curated global", global: true);
+        var id = global.GetProperty("id").GetString()!;
+
+        using var put = await user.PutAsJsonAsync($"/api/v1/recipes/{id}",
+            RecipeBody("Hijacked name"), Json);
+        Assert.Equal(HttpStatusCode.Forbidden, put.StatusCode);
+
+        using var del = await user.DeleteAsync($"/api/v1/recipes/{id}");
+        Assert.Equal(HttpStatusCode.Forbidden, del.StatusCode);
+    }
+
+    /// <summary>Another user's private recipe is a 404 on every write path (existence stays hidden).</summary>
+    [Fact]
+    public async Task A_foreign_private_recipe_is_404_on_edit_and_delete()
+    {
+        var alice = await fixture.CreateReadyClientAsync(subject: $"for-alice-{Guid.NewGuid():N}");
+        var bob = await fixture.CreateReadyClientAsync(subject: $"for-bob-{Guid.NewGuid():N}");
+
+        var id = (await CreateRecipeAsync(alice, "Alice private")).GetProperty("id").GetString()!;
+
+        using var put = await bob.PutAsJsonAsync($"/api/v1/recipes/{id}", RecipeBody("nope"), Json);
+        Assert.Equal(HttpStatusCode.NotFound, put.StatusCode);
+
+        using var del = await bob.DeleteAsync($"/api/v1/recipes/{id}");
+        Assert.Equal(HttpStatusCode.NotFound, del.StatusCode);
+    }
+
+    /// <summary>The owner can edit and delete their own recipe.</summary>
+    [Fact]
+    public async Task Owner_can_edit_and_delete_their_recipe()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"crud-{Guid.NewGuid():N}");
+        var id = (await CreateRecipeAsync(client, "Editable")).GetProperty("id").GetString()!;
+
+        using (var put = await client.PutAsJsonAsync($"/api/v1/recipes/{id}", RecipeBody("Edited name"), Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+            var dto = await put.Content.ReadFromJsonAsync<JsonElement>(Json);
+            Assert.Equal("Edited name", dto.GetProperty("name").GetString());
+        }
+
+        using (var del = await client.DeleteAsync($"/api/v1/recipes/{id}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        using var gone = await client.GetAsync($"/api/v1/recipes/{id}");
+        Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
+    }
+
+    /// <summary>An admin promotes a private recipe to global; a non-admin is refused (403).</summary>
+    [Fact]
+    public async Task Admin_can_promote_a_recipe_to_global_and_non_admin_cannot()
+    {
+        var admin = await fixture.CreateReadyClientAsync(subject: $"promo-adm-{Guid.NewGuid():N}", role: "admin");
+        var user = await fixture.CreateReadyClientAsync(subject: $"promo-usr-{Guid.NewGuid():N}", role: "user");
+
+        // A non-admin cannot reach the promote surface at all (admin-gated).
+        var userRecipe = (await CreateRecipeAsync(user, "User recipe")).GetProperty("id").GetString()!;
+        using (var forbidden = await Post(user, $"/api/v1/recipes/{userRecipe}/promote-global"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
+
+        // The admin promotes their own private recipe → it becomes global and visible to the user.
+        var adminRecipe = (await CreateRecipeAsync(admin, "Promote me")).GetProperty("id").GetString()!;
+        using (var promote = await Post(admin, $"/api/v1/recipes/{adminRecipe}/promote-global"))
+        {
+            Assert.Equal(HttpStatusCode.OK, promote.StatusCode);
+            var dto = await promote.Content.ReadFromJsonAsync<JsonElement>(Json);
+            Assert.True(dto.GetProperty("isGlobal").GetBoolean());
+        }
+
+        using var seen = await user.GetAsync($"/api/v1/recipes/{adminRecipe}");
+        Assert.Equal(HttpStatusCode.OK, seen.StatusCode);
+    }
+
+    /// <summary>
+    /// Security invariant for generation: every recipe the generator placed into a user's plan must be
+    /// one that user can actually see (global ∪ own). A leak of another user's private recipe into the
+    /// pool would surface here as a slot the owner can't GET (404).
+    /// </summary>
+    [Fact]
+    public async Task Every_recipe_in_a_generated_plan_is_visible_to_the_plan_owner()
+    {
+        // Another user with a private, fully-resolved recipe that must never leak into anyone else's pool.
+        var stranger = await fixture.CreateReadyClientAsync(subject: $"leak-stranger-{Guid.NewGuid():N}");
+        await CreateRecipeAsync(stranger, "Stranger private high-protein", tags: HighProteinDinnerTags);
+
+        var owner = await fixture.CreateReadyClientAsync(subject: $"leak-owner-{Guid.NewGuid():N}");
+        var plan = await CreateReadyPlanAsync(owner, eaters: 1);
+
+        var recipeIds = plan.GetProperty("slots").EnumerateArray()
+            .Select(s => s.GetProperty("recipeId").GetString()!)
+            .Distinct();
+
+        foreach (var id in recipeIds)
+        {
+            using var res = await owner.GetAsync($"/api/v1/recipes/{id}");
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode); // 404 here would mean a foreign recipe leaked in
+        }
+    }
+
+    // ---- recipe-ownership helpers ----
+
+    private static async Task<JsonElement> CreateRecipeAsync(
+        HttpClient client, string name, bool global = false, string[]? tags = null)
+    {
+        using var res = await client.PostAsJsonAsync("/api/v1/recipes", RecipeBody(name, global, tags), Json);
+        Assert.Equal(HttpStatusCode.Created, res.StatusCode);
+        return await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+    }
+
+    private static object RecipeBody(string name, bool global = false, string[]? tags = null) => new
+    {
+        name,
+        servings = 2,
+        totalMinutes = 10,
+        instructions = "mix",
+        tags = tags ?? new[] { "test" },
+        ingredients = new[] { new { quantity = 100.0, unit = "g", name = "egg" } },
+        global,
+    };
+
+    private static async Task<HttpResponseMessage> Post(HttpClient client, string path)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, path);
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        return await client.SendAsync(req);
     }
 
     /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>

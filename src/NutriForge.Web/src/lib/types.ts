@@ -255,6 +255,10 @@ export interface RecipeSummary {
   proteinPerServing: number;
   fatPerServing: number;
   carbPerServing: number;
+  /** Shared, admin-curated recipe (readable by everyone). */
+  isGlobal: boolean;
+  /** Owned by the current user (so the UI can gate edit/delete). */
+  isMine: boolean;
 }
 
 export interface RecipeIngredient {
@@ -296,6 +300,8 @@ export interface CreateRecipeRequest {
   sourceType?: string;
   sourceVideoId?: string;
   thumbnailUrl?: string;
+  /** Intent to create a shared GLOBAL recipe. Honored only for admins; ignored otherwise. */
+  global?: boolean;
 }
 
 /** A request to import a recipe from a YouTube/recipe URL or pasted recipe text. */

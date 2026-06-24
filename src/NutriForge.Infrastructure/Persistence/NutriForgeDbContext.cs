@@ -14,7 +14,9 @@ namespace NutriForge.Infrastructure.Persistence;
 /// The operational store (database <c>appdb</c>). Holds the public-read catalog (schema
 /// <c>catalog</c>) and the user-owned data + infra tables (schema <c>app</c>). A global query
 /// filter isolates every <see cref="IUserOwned"/> entity by the current user (ADR-0001); the
-/// catalog is unfiltered. Implements the Application context ports so handlers stay provider-free.
+/// catalog foods/ingredients stay unfiltered, but <see cref="Recipe"/> is owner-scoped (a recipe is
+/// visible when it is global — no owner — or owned by the current user). Implements the Application
+/// context ports so handlers stay provider-free.
 /// </summary>
 /// <remarks>
 /// v1 uses a single operational context for delivery simplicity; the schema split keeps the
@@ -31,6 +33,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Domain.Catalog.Food> Foods => Set<Domain.Catalog.Food>();
     public DbSet<Portion> Portions => Set<Portion>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<DietType> DietTypes => Set<DietType>();
 
@@ -117,8 +120,15 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasMany(r => r.Ingredients).WithOne().HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(r => r.Ingredients).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasIndex(r => r.IsNutritionComputed);
-            // Dedup imported videos: at most one recipe per source video (partial index ignores nulls).
-            e.HasIndex(r => r.SourceVideoId).IsUnique().HasFilter("\"SourceVideoId\" IS NOT NULL");
+            // Owner-scoped: null OwnerUserId = a GLOBAL (admin-curated) recipe; otherwise private to a user.
+            e.HasIndex(r => r.OwnerUserId);
+            // Dedup imported videos PER OWNER: one global copy AND one private copy per user are both
+            // allowed (each user can import the same video), but a given owner can't hold two of the same.
+            // Partial index ignores hand-authored recipes (null video id).
+            e.HasIndex(r => new { r.OwnerUserId, r.SourceVideoId }).IsUnique().HasFilter("\"SourceVideoId\" IS NOT NULL");
+            // Visibility: everyone reads global recipes (OwnerUserId IS NULL) plus their own. The catalog
+            // food/ingredient tables stay unfiltered; only recipes carry an owner.
+            e.HasQueryFilter(r => r.OwnerUserId == null || r.OwnerUserId == CurrentUserId);
         });
 
         b.Entity<RecipeIngredient>(e =>

@@ -1,10 +1,15 @@
 using NutriForge.Api.Setup;
+using NutriForge.Application.Abstractions;
 using NutriForge.Application.Authorization;
 using NutriForge.Application.Recipes;
 
 namespace NutriForge.Api.Endpoints;
 
-/// <summary>Recipes — computed-nutrition catalog: list, get, create, scale.</summary>
+/// <summary>
+/// Recipes — computed-nutrition catalog with ownership: list, get, scale, create, edit, delete, and
+/// (admin) promote-to-global. Reads are scoped by the DB query filter to <c>global ∪ the caller</c>;
+/// the owner of a created recipe is always server-derived, never bound from the body.
+/// </summary>
 public static class RecipeEndpoints
 {
     public static IEndpointRouteBuilder MapRecipeEndpoints(this IEndpointRouteBuilder app)
@@ -27,17 +32,63 @@ public static class RecipeEndpoints
             await recipes.ScaleAsync(id, servings, ct) is { } s ? Results.Ok(s) : Results.NotFound())
             .WithName("ScaleRecipe");
 
-        group.MapPost("/", async (CreateRecipeRequest req, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/", async (CreateRecipeRequest req, RecipeService recipes, ICurrentUser user, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(req.Name) || req.Ingredients is null || req.Ingredients.Count == 0)
+            if (Invalid(req) is { } problem)
             {
-                return Results.Problem(title: "Invalid recipe", detail: "A name and at least one ingredient are required.",
-                    statusCode: StatusCodes.Status400BadRequest);
+                return problem;
             }
 
-            var created = await recipes.CreateAsync(req, ct);
+            // Owner is ALWAYS server-derived. A global recipe is admin-only (the `Global` body flag is mere
+            // intent, honored here only for admins); everyone else gets a recipe owned by themselves.
+            var makeGlobal = req.Global && user.IsInRole(Roles.Admin);
+            Guid? owner = makeGlobal ? null : user.UserId;
+
+            var created = await recipes.CreateAsync(req, owner, ct);
             return Results.Created($"/api/v1/recipes/{created.Id}", created);
         }).WithName("CreateRecipe");
+
+        group.MapPut("/{id:guid}", async (Guid id, CreateRecipeRequest req, RecipeService recipes, CancellationToken ct) =>
+        {
+            if (Invalid(req) is { } problem)
+            {
+                return problem;
+            }
+
+            var result = await recipes.UpdateAsync(id, req, ct);
+            return result.Status switch
+            {
+                RecipeWriteStatus.Ok => Results.Ok(result.Recipe),
+                RecipeWriteStatus.Forbidden => Forbidden(),
+                _ => Results.NotFound(),
+            };
+        }).WithName("UpdateRecipe");
+
+        group.MapDelete("/{id:guid}", async (Guid id, RecipeService recipes, CancellationToken ct) =>
+        {
+            var status = await recipes.DeleteAsync(id, ct);
+            return status switch
+            {
+                RecipeWriteStatus.Ok => Results.NoContent(),
+                RecipeWriteStatus.Forbidden => Forbidden(),
+                _ => Results.NotFound(),
+            };
+        }).WithName("DeleteRecipe");
+
+        // Promote a recipe to the shared GLOBAL catalog. Admin-only — layered on top of the group's
+        // OwnerOnly so BOTH must pass.
+        group.MapPost("/{id:guid}/promote-global", async (Guid id, RecipeService recipes, CancellationToken ct) =>
+        {
+            var result = await recipes.PromoteToGlobalAsync(id, ct);
+            return result.Status switch
+            {
+                RecipeWriteStatus.Ok => Results.Ok(result.Recipe),
+                RecipeWriteStatus.Conflict => Results.Problem(title: "Already a global recipe",
+                    detail: "Another global recipe already exists for this source video.",
+                    statusCode: StatusCodes.Status409Conflict),
+                _ => Results.NotFound(),
+            };
+        }).RequireAuthorization(Policies.AdminOnly).WithName("PromoteRecipeToGlobal");
 
         // Import a recipe from a YouTube URL (or pasted recipe text) → an editable preview the user
         // confirms by posting it to POST /recipes. The LLM recognizes; the catalog owns the numbers.
@@ -67,4 +118,15 @@ public static class RecipeEndpoints
 
         return app;
     }
+
+    private static IResult? Invalid(CreateRecipeRequest req) =>
+        string.IsNullOrWhiteSpace(req.Name) || req.Ingredients is null || req.Ingredients.Count == 0
+            ? Results.Problem(title: "Invalid recipe", detail: "A name and at least one ingredient are required.",
+                statusCode: StatusCodes.Status400BadRequest)
+            : null;
+
+    private static IResult Forbidden() =>
+        Results.Problem(title: "Not your recipe",
+            detail: "You can only edit or delete recipes you own (admins may also manage global recipes).",
+            statusCode: StatusCodes.Status403Forbidden);
 }
