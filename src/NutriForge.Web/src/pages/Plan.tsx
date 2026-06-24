@@ -9,8 +9,11 @@ import {
   Check,
   ChefHat,
   FileDown,
+  Plus,
   ShoppingCart,
   Sparkles,
+  Users,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,20 +79,31 @@ export function Plan() {
 
 // -------------------- Generation form --------------------
 
+/** A row in the "Cooking for" editor — an additional person besides the owner ("You"). */
+type MemberRow = { name: string; mode: "same" | "own"; kcal: string };
+
 function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [dietSlug, setDietSlug] = useState<DietSlug | "">("");
   const [kcalTarget, setKcalTarget] = useState("");
   const [maxPrep, setMaxPrep] = useState("");
   const [days, setDays] = useState("7");
-  const [eaters, setEaters] = useState("1");
+  const [members, setMembers] = useState<MemberRow[]>([]);
   const [desire, setDesire] = useState("");
+
+  function updateMember(i: number, patch: Partial<MemberRow>) {
+    setMembers((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+  }
 
   const create = useMutation({
     mutationFn: () => {
-      const body: CreateDietPlanRequest = {
-        horizonDays: Number(days) || 7,
-        eaters: Math.min(9, Math.max(1, Number(eaters) || 1)),
-      };
+      const body: CreateDietPlanRequest = { horizonDays: Number(days) || 7 };
+      const memberInputs = members
+        .filter((m) => m.name.trim().length > 0)
+        .map((m) => ({
+          name: m.name.trim(),
+          targetKcal: m.mode === "own" ? Number(m.kcal) || undefined : undefined,
+        }));
+      if (memberInputs.length > 0) body.members = memberInputs;
       if (dietSlug) body.dietSlug = dietSlug;
       if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
       if (maxPrep.trim()) body.maxPrepMinutes = Number(maxPrep);
@@ -145,30 +159,80 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="days">Days</Label>
-            <Input
-              id="days"
-              type="number"
-              min={1}
-              max={30}
-              value={days}
-              onChange={(e) => setDays(e.target.value)}
-            />
+        <div className="space-y-1">
+          <Label htmlFor="days">Days</Label>
+          <Input
+            id="days"
+            type="number"
+            min={1}
+            max={30}
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Cooking for</Label>
+          <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
+            <Users className="h-4 w-4 text-slate-500" />
+            <span className="font-medium text-slate-100">You</span>
+            <span className="text-xs text-slate-500">· your target</span>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="eaters">People</Label>
-            <Input
-              id="eaters"
-              type="number"
-              min={1}
-              max={9}
-              value={eaters}
-              onChange={(e) => setEaters(e.target.value)}
-            />
-            <p className="text-xs text-slate-500">Cook &amp; shop for this many.</p>
-          </div>
+
+          {members.map((m, i) => (
+            <div
+              key={i}
+              className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2"
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  value={m.name}
+                  onChange={(e) => updateMember(i, { name: e.target.value })}
+                  placeholder="e.g. Girlfriend"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setMembers((prev) => prev.filter((_, idx) => idx !== i))}
+                  aria-label="Remove person"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={m.mode}
+                  onChange={(e) => updateMember(i, { mode: e.target.value as "same" | "own" })}
+                >
+                  <option value="same">Same as me</option>
+                  <option value="own">Own calorie target</option>
+                </Select>
+                {m.mode === "own" ? (
+                  <Input
+                    type="number"
+                    min={800}
+                    max={6000}
+                    value={m.kcal}
+                    onChange={(e) => updateMember(i, { kcal: e.target.value })}
+                    placeholder="kcal"
+                    className="w-32"
+                  />
+                ) : null}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMembers((prev) => [...prev, { name: "", mode: "same", kcal: "" }])}
+          >
+            <Plus className="h-4 w-4" />
+            Add person
+          </Button>
+          <p className="text-xs text-slate-500">
+            Everyone eats the same meals; each person&apos;s portion scales to their target.
+          </p>
         </div>
 
         <div className="space-y-1">
@@ -305,9 +369,12 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
   const days = useMemo(() => groupByDay(plan.slots), [plan.slots]);
   const dayCount = days.length;
   const eaters = plan.eaters ?? 1;
-  // achieved* are already PER-EATER, PER-DAY averages from the server. Show them as-is: do NOT
-  // divide by dayCount again (that was a bug — it showed ~target/days), and NEVER multiply by
-  // eaters (these describe one person's day; only cook totals + the shopping list scale by people).
+  const members = plan.members ?? [];
+  // `portion` = Σ member factors (or eaters when no members) — scales cook totals + shopping only.
+  const portion = plan.portionMultiplier ?? eaters;
+  // achieved* are already PER-PRIMARY, PER-DAY averages from the server. Show them as-is: do NOT
+  // divide by dayCount again, and NEVER multiply by the headcount (they describe ONE person's day;
+  // each member's portion = achieved × their factor).
 
   const accept = useMutation({
     mutationFn: () => dietPlansApi.accept(plan.id),
@@ -378,6 +445,25 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
             <Stat label="Carbs/day" value={`${round(plan.achievedCarbG)}g`} />
           </div>
 
+          {members.length > 1 ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+              <p className="mb-1.5 text-xs font-medium tracking-wide text-slate-500 uppercase">
+                Portions per person
+              </p>
+              <ul className="space-y-1">
+                {members.map((m, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="truncate text-slate-100">{m.name}</span>
+                    <span className="shrink-0 text-xs text-slate-400">
+                      ~{round(plan.achievedKcal * m.portionFactor)} kcal/day ·{" "}
+                      {round(m.portionFactor, 2)}× portions
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {plan.message ? (
             <p className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-300">
               {plan.message}
@@ -445,9 +531,9 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
                           <span className="text-xs text-slate-500">
                             {round(slot.servings, 2)} serving
                             {slot.servings === 1 ? "" : "s"}
-                            {eaters > 1 ? "/person" : ""}
-                            {eaters > 1
-                              ? ` · cook ${round(slot.servings * eaters, 2)} total`
+                            {portion > 1 ? "/person" : ""}
+                            {portion > 1
+                              ? ` · cook ${round(slot.servings * portion, 2)} total`
                               : ""}
                           </span>
                         </td>
@@ -472,9 +558,9 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
           <CardHeader>
             <CardTitle>Shopping list</CardTitle>
             <p className="text-xs text-slate-500">
-              Totals for {dayCount} {dayCount === 1 ? "day" : "days"} ×{" "}
-              {eaters} {eaters === 1 ? "person" : "people"} ={" "}
-              {dayCount * eaters} person-days
+              Totals for {dayCount} {dayCount === 1 ? "day" : "days"} ·{" "}
+              {eaters} {eaters === 1 ? "person" : "people"}
+              {members.length > 1 ? ` (${round(portion, 2)}× portions)` : ""}
             </p>
           </CardHeader>
           <CardContent>

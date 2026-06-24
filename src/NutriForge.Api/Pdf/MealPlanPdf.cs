@@ -16,7 +16,8 @@ public static class MealPlanPdf
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(shopping);
 
-        var eaters = Math.Max(1, plan.Eaters);
+        var eaters = Math.Max(1, plan.Eaters);            // headcount, for labels
+        var portion = Math.Max(1, plan.PortionMultiplier); // Σ portion factors, for cook quantities
         var days = plan.Slots.Select(s => s.Day).DefaultIfEmpty(0).Max();
         var people = eaters == 1 ? "person" : "people";
 
@@ -66,7 +67,7 @@ public static class MealPlanPdf
                                     table.Cell().Text(slot.MealSlot).FontColor(Colors.Grey.Medium);
                                     table.Cell().Text(slot.RecipeName);
                                     table.Cell().AlignRight().Text($"{Math.Round(slot.Servings, 2)}×/person");
-                                    table.Cell().AlignRight().Text(eaters > 1 ? $"cook {Math.Round(slot.Servings * eaters, 2)}" : "—")
+                                    table.Cell().AlignRight().Text(portion > 1 ? $"cook {Math.Round(slot.Servings * portion, 2)}" : "—")
                                         .FontColor(Colors.Grey.Medium);
                                     table.Cell().AlignRight().Text($"{Math.Round(slot.Kcal)} kcal");
                                 }

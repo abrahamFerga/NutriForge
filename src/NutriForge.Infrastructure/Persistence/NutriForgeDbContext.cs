@@ -229,6 +229,8 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(m => m.Eaters).HasDefaultValue(1);
             e.HasMany(m => m.Slots).WithOne().HasForeignKey(s => s.MealPlanId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(m => m.Slots).UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasMany(m => m.Members).WithOne().HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(m => m.Members).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasQueryFilter(m => m.UserId == CurrentUserId);
         });
 
@@ -238,6 +240,14 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(s => s.Id);
             e.Property(s => s.MealSlot).HasConversion<string>().HasMaxLength(20);
             e.Property(s => s.RecipeName).HasMaxLength(300);
+        });
+
+        // Owned via the filtered MealPlan navigation (no own query filter, no direct endpoint).
+        b.Entity<PlanMember>(e =>
+        {
+            e.ToTable("plan_members", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.Name).HasMaxLength(120).IsRequired();
         });
 
         b.Entity<Domain.Notifications.ChannelMessage>(e =>

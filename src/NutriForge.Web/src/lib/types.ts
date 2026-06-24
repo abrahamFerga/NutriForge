@@ -380,22 +380,38 @@ export interface DietPlanSlot {
   carbG: number;
 }
 
+/** A person on the plan, with their already-clamped portion factor (the UI never re-derives it). */
+export interface PlanMemberDto {
+  name: string;
+  targetKcal: number;
+  portionFactor: number;
+}
+
 export interface DietPlanDto {
   id: string;
   status: DietPlanStatus;
   targetKcal: number;
-  /** Per-eater daily averages — never multiply these by `eaters` in the UI. */
+  /** Per-primary daily averages — never multiply by the headcount; each member = × portionFactor. */
   achievedKcal: number;
   achievedProteinG: number;
   achievedFatG: number;
   achievedCarbG: number;
-  /** People the plan is cooked/shopped for. Scales cook totals + the shopping list only. */
+  /** Headcount (for labels). Quantities scale by `portionMultiplier`. */
   eaters: number;
+  /** Σ of member portion factors (or eaters when no members) — scales cook totals + shopping. */
+  portionMultiplier: number;
+  members: PlanMemberDto[];
   message: string | null;
   slots: DietPlanSlot[];
 }
 
 export type DietSlug = "vegan" | "vegetarian" | "high-protein";
+
+/** One additional person (the owner is added automatically). Omit targetKcal for "same as me". */
+export interface PlanMemberInput {
+  name: string;
+  targetKcal?: number;
+}
 
 export interface CreateDietPlanRequest {
   desire?: string;
@@ -406,8 +422,10 @@ export interface CreateDietPlanRequest {
   maxPrepMinutes?: number;
   mealsPerDay?: number;
   horizonDays?: number;
-  /** Number of people to cook/shop for (default 1). */
+  /** Number of people to cook/shop for (default 1). Ignored when `members` is set. */
   eaters?: number;
+  /** The OTHER people eating this plan (the owner is added automatically). */
+  members?: PlanMemberInput[];
 }
 
 export interface AdherencePoint {

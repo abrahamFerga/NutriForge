@@ -418,12 +418,60 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
     }
 
-    /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>
-    private static async Task<JsonElement> CreateReadyPlanAsync(HttpClient client, int? eaters, int days = 3)
+    /// <summary>Members scale the shopping list by the SUM of their portion factors (owner is auto-added).</summary>
+    [Fact]
+    public async Task Plan_members_scale_the_shopping_list_by_the_sum_of_portion_factors()
     {
-        object body = eaters is null
-            ? new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0 }
-            : new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0, eaters };
+        var client = await fixture.CreateReadyClientAsync(subject: $"members-shop-{Guid.NewGuid():N}");
+        var solo = await CreateReadyPlanAsync(client, eaters: 1);
+        // owner 2000 (factor 1.0) + a 1000-kcal member (factor 0.5) ⇒ multiplier 1.5.
+        var couple = await CreateReadyPlanAsync(client, eaters: null,
+            members: new object[] { new { name = "GF", targetKcal = 1000.0 } });
+
+        Assert.Equal(1.5, couple.GetProperty("portionMultiplier").GetDouble(), 3);
+
+        var gramsSolo = await ShoppingGramsTotalAsync(client, solo.GetProperty("id").GetString()!);
+        var gramsCouple = await ShoppingGramsTotalAsync(client, couple.GetProperty("id").GetString()!);
+        Assert.True(gramsSolo > 0);
+        Assert.InRange(gramsCouple / gramsSolo, 1.48, 1.52); // weighted-sum groceries
+    }
+
+    /// <summary>Members NEVER change the generated per-primary plan (generation isolation, generalized).</summary>
+    [Fact]
+    public async Task Plan_members_do_not_change_the_generated_per_primary_plan()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"members-gen-{Guid.NewGuid():N}");
+        var solo = await CreateReadyPlanAsync(client, eaters: 1);
+        var withMembers = await CreateReadyPlanAsync(client, eaters: null,
+            members: new object[] { new { name = "GF", targetKcal = 1500.0 } });
+
+        // The single-primary plan is byte-identical whether or not members are attached.
+        Assert.Equal(solo.GetProperty("targetKcal").GetDouble(), withMembers.GetProperty("targetKcal").GetDouble());
+        Assert.Equal(solo.GetProperty("achievedKcal").GetDouble(), withMembers.GetProperty("achievedKcal").GetDouble());
+        var s1 = solo.GetProperty("slots");
+        var s2 = withMembers.GetProperty("slots");
+        Assert.Equal(s1.GetArrayLength(), s2.GetArrayLength());
+        for (var i = 0; i < s1.GetArrayLength(); i++)
+        {
+            Assert.Equal(s1[i].GetProperty("servings").GetDouble(), s2[i].GetProperty("servings").GetDouble());
+        }
+
+        // The owner is auto-added (factor 1.0); the member's factor = 1500/2000 = 0.75.
+        var members = withMembers.GetProperty("members");
+        Assert.Equal(2, members.GetArrayLength());
+        Assert.Equal("You", members[0].GetProperty("name").GetString());
+        Assert.Equal(1.0, members[0].GetProperty("portionFactor").GetDouble(), 3);
+        Assert.Equal(0.75, members[1].GetProperty("portionFactor").GetDouble(), 3);
+    }
+
+    /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>
+    private static async Task<JsonElement> CreateReadyPlanAsync(HttpClient client, int? eaters, int days = 3, object? members = null)
+    {
+        object body = members is not null
+            ? new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0, members }
+            : eaters is null
+                ? new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0 }
+                : new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0, eaters };
         using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diet-plans")
         {
             Content = JsonContent.Create(body, options: Json),

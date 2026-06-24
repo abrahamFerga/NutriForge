@@ -69,6 +69,8 @@ public sealed class DietPlanService(
         // The background worker remains the path for slow, LLM-backed SELECT in future.
         await FinishGenerationAsync(plan, intent, ct).ConfigureAwait(false);
 
+        AttachMembers(plan, req.Members);
+
         db.MealPlans.Add(plan);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -114,14 +116,14 @@ public sealed class DietPlanService(
 
     public async Task<DietPlanDto?> GetAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
-        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots)
+        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots).Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
         return plan is null ? null : ToDto(plan);
     }
 
     public async Task<DietPlanDto?> AcceptAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
-        var plan = await db.MealPlans.Include(p => p.Slots)
+        var plan = await db.MealPlans.Include(p => p.Slots).Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
         if (plan is null || plan.Status != PlanStatus.Ready)
         {
@@ -136,7 +138,7 @@ public sealed class DietPlanService(
     /// <summary>Closed loop: turn an accepted (or ready) plan's recipes into one consolidated shopping list.</summary>
     public async Task<ShoppingListDto?> GenerateShoppingListAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
-        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots)
+        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots).Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
         if (plan is null || plan.Slots.Count == 0)
         {
@@ -150,7 +152,7 @@ public sealed class DietPlanService(
     public async Task<(DietPlanDto Plan, ShoppingListDto Shopping)?> GetPlanWithShoppingAsync(
         Guid userId, Guid id, CancellationToken ct = default)
     {
-        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots)
+        var plan = await db.MealPlans.AsNoTracking().Include(p => p.Slots).Include(p => p.Members)
             .FirstOrDefaultAsync(p => p.Id == id && p.UserId == userId, ct).ConfigureAwait(false);
         if (plan is null || plan.Slots.Count == 0)
         {
@@ -162,15 +164,46 @@ public sealed class DietPlanService(
     }
 
     /// <summary>
-    /// Group the plan's slots into per-recipe shopping lines, scaled by <see cref="MealPlan.Eaters"/>.
-    /// This is the ONLY place the people-count touches quantities: ShoppingListService expands grams
-    /// from these servings, so multiplying once here yields exactly Eaters× the single-eater list.
-    /// Eaters is NEVER also passed into ShoppingListService (that would 4× the groceries).
+    /// Attach the plan's members AFTER generation (they never influence it). The OWNER is always the
+    /// primary (factor 1.0, target = plan target); the request carries only the OTHER people. When any
+    /// member is present they are the sole quantity authority and <see cref="MealPlan.Eaters"/> is
+    /// re-derived to the headcount (labels only); with no members the plan keeps its Eaters multiplier.
+    /// </summary>
+    private static void AttachMembers(MealPlan plan, IReadOnlyList<PlanMemberInput>? members)
+    {
+        if (members is not { Count: > 0 })
+        {
+            return;
+        }
+
+        plan.ClearMembers();
+        plan.AddMember(new PlanMember { Sequence = 0, Name = "You", TargetKcal = plan.TargetKcal });
+        var seq = 1;
+        foreach (var m in members)
+        {
+            var name = string.IsNullOrWhiteSpace(m.Name) ? "Member" : m.Name.Trim();
+            plan.AddMember(new PlanMember
+            {
+                Sequence = seq++,
+                Name = name.Length > 120 ? name[..120] : name,
+                TargetKcal = m.TargetKcal is > 0 ? m.TargetKcal.Value : plan.TargetKcal,
+            });
+        }
+
+        plan.Eaters = Math.Clamp(plan.Members.Count, 1, 9);
+    }
+
+    /// <summary>
+    /// Group the plan's slots into per-recipe shopping lines, scaled by <see cref="MealPlan.PortionMultiplier"/>
+    /// (Σ member portion factors, or Eaters when there are no members). This is the ONLY place the
+    /// people-count touches quantities: ShoppingListService expands grams from these servings, so
+    /// multiplying once here yields exactly the weighted-sum list. The multiplier is NEVER also passed
+    /// into ShoppingListService (that would multiply the groceries twice).
     /// </summary>
     private static List<ShoppingRecipeLine> BuildShoppingLines(MealPlan plan) =>
         plan.Slots
             .GroupBy(s => s.RecipeId)
-            .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings) * plan.Eaters))
+            .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings) * plan.PortionMultiplier))
             .ToList();
 
     /// <summary>Closed loop: how closely logged intake tracked the plan's daily target over the last week.</summary>
@@ -204,7 +237,10 @@ public sealed class DietPlanService(
 
     private static DietPlanDto ToDto(MealPlan p) => new(
         p.Id, p.Status.ToString(), p.TargetKcal,
-        p.AchievedKcal, p.AchievedProteinG, p.AchievedFatG, p.AchievedCarbG, p.Eaters, p.Message,
+        p.AchievedKcal, p.AchievedProteinG, p.AchievedFatG, p.AchievedCarbG, p.Eaters, p.PortionMultiplier,
+        // Order by Sequence (owner = 0) so the owner stays first regardless of DB row order on a re-query.
+        p.Members.OrderBy(m => m.Sequence).Select(m => new PlanMemberDto(m.Name, m.TargetKcal, MealPlan.FactorOf(m.TargetKcal, p.TargetKcal))).ToList(),
+        p.Message,
         p.Slots.OrderBy(s => s.Day).ThenBy(s => s.MealSlot)
             .Select(s => new PlanSlotDto(s.Day, s.MealSlot.ToString(), s.RecipeId, s.RecipeName, s.Servings,
                 s.Kcal, s.ProteinG, s.FatG, s.CarbG)).ToList());

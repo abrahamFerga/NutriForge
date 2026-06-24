@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using NutriForge.Domain.Common;
 
 namespace NutriForge.Domain.Planning;
@@ -52,6 +53,22 @@ public sealed class MealPlan : IUserOwned, IAuditable, ITimestamped
     private readonly List<PlanSlot> _slots = [];
     public IReadOnlyCollection<PlanSlot> Slots => _slots;
 
+    private readonly List<PlanMember> _members = [];
+
+    /// <summary>The people this plan is cooked for, each portion-scaled to their own target.</summary>
+    public IReadOnlyCollection<PlanMember> Members => _members;
+
+    /// <summary>
+    /// The single downstream multiplier that scales the consolidated shopping list and displayed cook
+    /// totals. With members, it is the SUM of their portion factors (everyone eats the same meals,
+    /// portion-scaled to their own target); with no members it falls back to <see cref="Eaters"/>
+    /// (identical portions). Like Eaters it NEVER enters generation — only shopping + display.
+    /// </summary>
+    [NotMapped]
+    public double PortionMultiplier => _members.Count > 0
+        ? _members.Sum(m => FactorOf(m.TargetKcal, TargetKcal))
+        : Eaters;
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -64,6 +81,41 @@ public sealed class MealPlan : IUserOwned, IAuditable, ITimestamped
     }
 
     public void ClearSlots() => _slots.Clear();
+
+    public PlanMember AddMember(PlanMember member)
+    {
+        ArgumentNullException.ThrowIfNull(member);
+        member.MealPlanId = Id;
+        _members.Add(member);
+        return member;
+    }
+
+    public void ClearMembers() => _members.Clear();
+
+    /// <summary>
+    /// A member's portion factor = their daily kcal relative to the plan's (primary) target, clamped to
+    /// a safety envelope so one member can't dominate or vanish the merged grocery total. Pure.
+    /// </summary>
+    public static double FactorOf(double memberKcal, double planTargetKcal) =>
+        Math.Clamp(memberKcal / Math.Max(planTargetKcal, 1), 0.25, 3.0);
+}
+
+/// <summary>
+/// A person eating a plan. Everyone eats the same meals; a member's portion of each meal scales by
+/// <see cref="MealPlan.FactorOf"/>(<see cref="TargetKcal"/>, plan target). Pure data — no behaviour.
+/// </summary>
+public sealed class PlanMember
+{
+    public Guid Id { get; private set; } = Guid.CreateVersion7();
+    public Guid MealPlanId { get; set; }
+
+    /// <summary>Display order; the owner is always 0. (Version-7 GUIDs aren't monotonic within a ms.)</summary>
+    public int Sequence { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The member's resolved per-day kcal target (the owner's equals the plan target).</summary>
+    public double TargetKcal { get; set; }
 }
 
 /// <summary>One meal in a plan: a recipe at a given day + meal slot, with computed servings/macros.</summary>
