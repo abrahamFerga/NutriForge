@@ -237,6 +237,8 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(m => m.IntentJson).HasColumnType("jsonb");
             // Server default 1 backfills existing single-eater plans (additive, no behaviour change).
             e.Property(m => m.Eaters).HasDefaultValue(1);
+            // Day-block rotation; default 1 backfills existing plans as "a fresh meal-set every day".
+            e.Property(m => m.BlockSize).HasDefaultValue(1);
             e.HasMany(m => m.Slots).WithOne().HasForeignKey(s => s.MealPlanId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(m => m.Slots).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasMany(m => m.Members).WithOne().HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Cascade);

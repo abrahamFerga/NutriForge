@@ -679,6 +679,85 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         return await client.SendAsync(req);
     }
 
+    // -------------------- Day-block rotation (cook-once-eat-N-days) --------------------
+
+    /// <summary>Block rotation round-trips and cooks ⌈horizon/blockSize⌉ distinct meal-sets, not one per day.</summary>
+    [Fact]
+    public async Task Day_blocks_cook_one_meal_set_per_block()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"blocks-{Guid.NewGuid():N}");
+
+        var daily = await GenReadyBlockAsync(client, days: 6, blockSize: 1, eaters: 1);
+        var blocked = await GenReadyBlockAsync(client, days: 6, blockSize: 3, eaters: 1);
+
+        // A fresh meal-set every day ⇒ 6 distinct day-indices.
+        Assert.Equal(6, daily.GetProperty("numBlocks").GetInt32());
+        Assert.Equal(6, DistinctSlotDays(daily));
+
+        // Two 3-day blocks ⇒ 2 distinct meal-sets, reported as such.
+        Assert.Equal(6, blocked.GetProperty("horizonDays").GetInt32());
+        Assert.Equal(3, blocked.GetProperty("blockSize").GetInt32());
+        Assert.Equal(2, blocked.GetProperty("numBlocks").GetInt32());
+        Assert.Equal(2, DistinctSlotDays(blocked));
+
+        // The per-day average is unaffected by how the days are blocked (both ~ the 2000 target).
+        Assert.InRange(daily.GetProperty("achievedKcal").GetDouble(), 1850, 2150);
+        Assert.InRange(blocked.GetProperty("achievedKcal").GetDouble(), 1850, 2150);
+    }
+
+    /// <summary>
+    /// A single block covering N days buys exactly N× the groceries of one covering 1 day (same recipes,
+    /// scaled by the block's day-count), and eaters multiplies on top — block-days × people, no double count.
+    /// </summary>
+    [Fact]
+    public async Task A_block_buys_its_day_count_times_the_groceries_and_eaters_compose()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"blocks-shop-{Guid.NewGuid():N}");
+
+        // blockSize == horizon ⇒ ONE block. With one block the greedy selection is identical regardless of
+        // horizon (same first meals, same servings), so the only difference is the block's day-count.
+        var twoDays = await GenReadyBlockAsync(client, days: 2, blockSize: 2, eaters: 1);
+        var fourDays = await GenReadyBlockAsync(client, days: 4, blockSize: 4, eaters: 1);
+        var twoDaysTwoPeople = await GenReadyBlockAsync(client, days: 2, blockSize: 2, eaters: 2);
+
+        var g2 = await ShoppingGramsTotalAsync(client, twoDays.GetProperty("id").GetString()!);
+        var g4 = await ShoppingGramsTotalAsync(client, fourDays.GetProperty("id").GetString()!);
+        var g2x2 = await ShoppingGramsTotalAsync(client, twoDaysTwoPeople.GetProperty("id").GetString()!);
+
+        Assert.True(g2 > 0, "expected a non-empty shopping list");
+        Assert.InRange(g4 / g2, 1.98, 2.02);   // 4-day block buys 2× a 2-day block (same meal-set)
+        Assert.InRange(g2x2 / g2, 1.98, 2.02);  // 2 people buy 2× — composes with, doesn't double, block-days
+    }
+
+    private static int DistinctSlotDays(JsonElement plan) =>
+        plan.GetProperty("slots").EnumerateArray().Select(s => s.GetProperty("day").GetInt32()).Distinct().Count();
+
+    /// <summary>Create a Ready plan with an explicit day-block size + headcount.</summary>
+    private static async Task<JsonElement> GenReadyBlockAsync(HttpClient client, int days, int blockSize, int eaters)
+    {
+        var body = new { dietSlug = "high-protein", horizonDays = days, kcalTarget = 2000.0, blockSize, eaters };
+        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diet-plans")
+        {
+            Content = JsonContent.Create(body, options: Json),
+        };
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using var res = await client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Accepted, res.StatusCode);
+        var planId = (await res.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetString();
+
+        JsonElement plan = default;
+        var status = "Generating";
+        for (var i = 0; i < 30 && status == "Generating"; i++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            plan = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diet-plans/{planId}", Json);
+            status = plan.GetProperty("status").GetString()!;
+        }
+
+        Assert.Equal("Ready", status);
+        return plan;
+    }
+
     /// <summary>Create a diet plan (fresh idempotency key) and poll until it is Ready.</summary>
     private static async Task<JsonElement> CreateReadyPlanAsync(HttpClient client, int? eaters, int days = 3, object? members = null)
     {

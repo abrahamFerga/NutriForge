@@ -45,12 +45,16 @@ public sealed class DietPlanService(
 
         var intent = new DietIntent(
             kcalTarget, target?.ProteinG, req.DietSlug, [.. exclude],
-            req.MaxPrepMinutes, req.MealsPerDay ?? 3, req.HorizonDays ?? 7);
+            req.MaxPrepMinutes, req.MealsPerDay ?? 3, req.HorizonDays ?? 7, req.BlockSize ?? 1);
 
         if (!string.IsNullOrWhiteSpace(req.Desire) && parser.IsConfigured)
         {
             intent = await parser.ParseAsync(req.Desire, intent, ct).ConfigureAwait(false);
         }
+
+        // Day-block rotation is a user cooking preference, not an LLM inference: force it from the request
+        // and clamp to the (possibly parser-adjusted) horizon. Like Eaters it never alters the per-day target.
+        intent = intent with { BlockSize = Math.Clamp(req.BlockSize ?? 1, 1, Math.Max(intent.HorizonDays, 1)) };
 
         var plan = new MealPlan
         {
@@ -63,6 +67,7 @@ public sealed class DietPlanService(
             // Clamp the people-count to a sane [1, 9] in ONE place. Deliberately NOT fed into `intent`
             // or `kcalTarget` above — generation stays per-eater; Eaters only scales the shopping list.
             Eaters = Math.Clamp(req.Eaters ?? 1, 1, 9),
+            BlockSize = intent.BlockSize,
         };
 
         // Run the deterministic pipeline now (it's fast) so the 202 poll returns a finished plan.
@@ -203,7 +208,10 @@ public sealed class DietPlanService(
     private static List<ShoppingRecipeLine> BuildShoppingLines(MealPlan plan) =>
         plan.Slots
             .GroupBy(s => s.RecipeId)
-            .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings) * plan.PortionMultiplier))
+            // Each slot's Day is a BLOCK index; the block is cooked once but eaten for BlockDaysFor(day)
+            // days, so weight its servings by that day-count before applying the people multiplier. With
+            // BlockSize 1 every block covers 1 day ⇒ identical to the per-day list (no double count).
+            .Select(g => new ShoppingRecipeLine(g.Key, g.Sum(s => s.Servings * plan.BlockDaysFor(s.Day)) * plan.PortionMultiplier))
             .ToList();
 
     /// <summary>Closed loop: how closely logged intake tracked the plan's daily target over the last week.</summary>
@@ -240,6 +248,7 @@ public sealed class DietPlanService(
         p.AchievedKcal, p.AchievedProteinG, p.AchievedFatG, p.AchievedCarbG, p.Eaters, p.PortionMultiplier,
         // Order by Sequence (owner = 0) so the owner stays first regardless of DB row order on a re-query.
         p.Members.OrderBy(m => m.Sequence).Select(m => new PlanMemberDto(m.Name, m.TargetKcal, MealPlan.FactorOf(m.TargetKcal, p.TargetKcal))).ToList(),
+        p.HorizonDays, p.BlockSize, p.NumBlocks,
         p.Message,
         p.Slots.OrderBy(s => s.Day).ThenBy(s => s.MealSlot)
             .Select(s => new PlanSlotDto(s.Day, s.MealSlot.ToString(), s.RecipeId, s.RecipeName, s.Servings,

@@ -86,6 +86,28 @@ public sealed class DietGenerationTests
     }
 
     [Fact]
+    public void Generate_with_day_blocks_emits_one_meal_set_per_block_and_keeps_the_per_day_average()
+    {
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer());
+        var pool = new[]
+        {
+            Rec("Vegan bowl A", ["vegan"], ("tofu", new Macros(400, 30, 12, 30))),
+            Rec("Vegan bowl B", ["vegan"], ("beans", new Macros(600, 25, 10, 80))),
+            Rec("Vegan bowl C", ["vegan"], ("oats", new Macros(500, 18, 9, 70))),
+        };
+        // 6-day horizon cooked as two 3-day blocks ⇒ two distinct meal-sets, not six.
+        var intent = new DietIntent(2000, null, "vegan", [], null, MealsPerDay: 3, HorizonDays: 6, BlockSize: 3);
+
+        var result = generator.Generate(pool, intent, kcalTarget: 2000);
+
+        Assert.True(result.Feasible, result.Message);
+        Assert.Equal(6, result.Slots.Count); // 2 blocks × 3 meals (NOT 6 days × 3)
+        Assert.Equal([1, 2], result.Slots.Select(s => s.Day).Distinct().Order().ToArray());
+        // The daily average is per-DAY and stays on target regardless of how days are blocked.
+        Assert.True(Math.Abs(result.DailyAverage.Kcal - 2000) <= 100, $"avg {result.DailyAverage.Kcal}");
+    }
+
+    [Fact]
     public void Generate_returns_infeasible_when_no_recipes_match()
     {
         var generator = new DietPlanGenerator(new OrToolsPortionOptimizer());

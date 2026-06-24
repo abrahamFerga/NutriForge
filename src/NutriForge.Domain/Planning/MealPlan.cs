@@ -33,6 +33,16 @@ public sealed class MealPlan : IUserOwned, IAuditable, ITimestamped
     public double TargetKcal { get; set; }
 
     /// <summary>
+    /// Day-block rotation (cook-once-eat-N-days): the number of consecutive days each cooked meal-set
+    /// covers. <c>1</c> (default) = a distinct meal-set every day (no rotation). A 6-day plan with
+    /// <c>BlockSize=3</c> is two 3-day blocks — the user cooks two meal-sets and eats each for 3 days.
+    /// The generator emits one distinct meal-set per block (each <see cref="PlanSlot.Day"/> is a BLOCK
+    /// index, not a calendar day); shopping weights each block by its day-count. Like Eaters it is a pure
+    /// downstream concern — it NEVER changes the per-day target/macros. Clamped to [1, HorizonDays].
+    /// </summary>
+    public int BlockSize { get; set; } = 1;
+
+    /// <summary>
     /// Number of people this plan is cooked and shopped for (default 1). This is a pure DOWNSTREAM
     /// multiplier: it scales the consolidated shopping list and the displayed cook totals only. It
     /// MUST NEVER enter generation — the generator targets ONE eater's daily kcal/macros, so
@@ -98,6 +108,29 @@ public sealed class MealPlan : IUserOwned, IAuditable, ITimestamped
     /// </summary>
     public static double FactorOf(double memberKcal, double planTargetKcal) =>
         Math.Clamp(memberKcal / Math.Max(planTargetKcal, 1), 0.25, 3.0);
+
+    /// <summary>The effective block size, clamped to a sane [1, HorizonDays].</summary>
+    private int EffectiveBlockSize => Math.Clamp(BlockSize, 1, Math.Max(HorizonDays, 1));
+
+    /// <summary>How many distinct meal-sets (blocks) the plan cooks: ⌈HorizonDays / BlockSize⌉.</summary>
+    [NotMapped]
+    public int NumBlocks => (int)Math.Ceiling(Math.Max(HorizonDays, 1) / (double)EffectiveBlockSize);
+
+    /// <summary>
+    /// The number of calendar days a block (1-indexed) covers — usually <see cref="BlockSize"/>, but the
+    /// final block is shorter when the horizon isn't a whole multiple (e.g. 7 days / blockSize 3 ⇒ 3,3,1).
+    /// Each block's groceries scale by this. Returns 0 for an out-of-range index.
+    /// </summary>
+    public int BlockDaysFor(int block)
+    {
+        if (block < 1 || block > NumBlocks)
+        {
+            return 0;
+        }
+
+        var size = EffectiveBlockSize;
+        return Math.Min(block * size, HorizonDays) - ((block - 1) * size);
+    }
 }
 
 /// <summary>

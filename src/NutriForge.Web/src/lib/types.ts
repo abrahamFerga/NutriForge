@@ -375,6 +375,7 @@ export interface CreateShoppingListRequest {
 export type DietPlanStatus = "Generating" | "Ready" | "Infeasible" | "Accepted";
 
 export interface DietPlanSlot {
+  /** With day-block rotation this is a BLOCK index (1..numBlocks), not a calendar day. */
   day: number;
   mealSlot: string;
   recipeId: string;
@@ -407,6 +408,12 @@ export interface DietPlanDto {
   /** Σ of member portion factors (or eaters when no members) — scales cook totals + shopping. */
   portionMultiplier: number;
   members: PlanMemberDto[];
+  /** Total days the plan covers. */
+  horizonDays: number;
+  /** Days each cooked meal-set covers (cook-once-eat-N-days). 1 = a fresh set every day. */
+  blockSize: number;
+  /** Distinct meal-sets cooked = ⌈horizonDays / blockSize⌉; each slot's `day` is a block index. */
+  numBlocks: number;
   message: string | null;
   slots: DietPlanSlot[];
 }
@@ -432,6 +439,8 @@ export interface CreateDietPlanRequest {
   eaters?: number;
   /** The OTHER people eating this plan (the owner is added automatically). */
   members?: PlanMemberInput[];
+  /** Cook-once-eat-N-days: days each cooked meal-set covers (default 1). Clamped to [1, horizonDays]. */
+  blockSize?: number;
 }
 
 export interface AdherencePoint {
