@@ -6,12 +6,20 @@
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Postgres with an Aspire-generated password (persisted to user-secrets for `dotnet run`;
-// regenerated per run in CI/tests, where containers start clean). Production does NOT run this
-// AppHost — Terraform/Container Apps inject the real connection strings (ADR-0013) — so no
-// hand-managed secret parameter is needed here. Ephemeral container (no data volume) keeps dev
-// and integration-test runs deterministic: a fresh password never collides with a stale volume.
+// Integration tests run the AppHost headless (SKIP_NPM_APPS=true): no SPA, the assistant left
+// unconfigured (to assert its 503 path), the OpenAI key not required, and an EPHEMERAL database
+// (a fresh, deterministic DB each run). A normal `dotnet run` / `aspire run` is the opposite.
+var underTest = string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase);
+
+// Postgres with an Aspire-generated password (persisted to user-secrets for `dotnet run`, so it is
+// stable across restarts). Production does NOT run this AppHost — Terraform/Container Apps inject the
+// real connection strings (ADR-0013). For local dev we attach a DATA VOLUME so your data (profile,
+// diary, recipes, plans) survives a restart; tests stay volumeless so each run starts clean.
 var postgres = builder.AddPostgres("postgres");
+if (!underTest)
+{
+    postgres.WithDataVolume();
+}
 
 var appDb = postgres.AddDatabase("appdb");       // foods, recipes, diary, plans, outbox, idempotency
 var auditDb = postgres.AddDatabase("auditdb");   // append-only audit, outside the operational DB
@@ -24,11 +32,6 @@ var api = builder.AddProject<Projects.NutriForge_Api>("api")
     .WithReference(auditDb).WaitFor(auditDb)
     .WithReference(cache).WaitFor(cache)
     .WithExternalHttpEndpoints();
-
-// Integration tests run the AppHost headless: no SPA, and the NutritionAssistant deliberately
-// unconfigured so they can assert its 503 graceful-degradation path. They signal this via
-// SKIP_NPM_APPS, which therefore also exempts them from the OpenAI-key requirement below.
-var underTest = string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase);
 
 // The MAF NutritionAssistant is a core capability, not an optional add-on: a real run MUST be
 // configured with an OpenAI key. Express that the Aspire way — a first-class secret *parameter* —
