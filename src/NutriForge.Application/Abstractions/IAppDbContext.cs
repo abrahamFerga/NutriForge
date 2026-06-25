@@ -19,6 +19,7 @@ public interface IAppDbContext
     DbSet<DiaryEntry> DiaryEntries { get; }
     DbSet<BodyMeasurement> BodyMeasurements { get; }
     DbSet<FavoriteFood> FavoriteFoods { get; }
+    DbSet<MealTemplate> MealTemplates { get; }
     DbSet<AssistantSession> AssistantSessions { get; }
     DbSet<PantryItem> PantryItems { get; }
     DbSet<ShoppingList> ShoppingLists { get; }

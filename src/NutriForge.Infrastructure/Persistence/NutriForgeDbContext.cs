@@ -45,6 +45,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
     public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
     public DbSet<FavoriteFood> FavoriteFoods => Set<FavoriteFood>();
+    public DbSet<MealTemplate> MealTemplates => Set<MealTemplate>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
@@ -219,6 +220,24 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(f => f.Id);
             e.HasIndex(f => new { f.UserId, f.FoodId }).IsUnique(); // at most one per (user, food)
             e.HasQueryFilter(f => f.UserId == CurrentUserId);
+        });
+
+        // Saved meals (#70): an owner-scoped aggregate with owned item children.
+        b.Entity<MealTemplate>(e =>
+        {
+            e.ToTable("meal_templates", "app");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Name).HasMaxLength(120).IsRequired();
+            e.HasIndex(t => t.UserId);
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
+            e.HasMany(t => t.Items).WithOne().HasForeignKey(i => i.MealTemplateId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(t => t.Items).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        b.Entity<MealTemplateItem>(e =>
+        {
+            e.ToTable("meal_template_items", "app");
+            e.HasKey(i => i.Id);
         });
 
         b.Entity<AssistantSession>(e =>

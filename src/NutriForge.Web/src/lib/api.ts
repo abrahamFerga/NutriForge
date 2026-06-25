@@ -23,6 +23,7 @@ import type {
   LogMeasurementRequest,
   LogProposal,
   Measurement,
+  MealTemplate,
   QuickAddFood,
   MealSlot,
   PantryItem,
@@ -317,6 +318,33 @@ export const favoritesApi = {
   },
   remove(foodId: string): Promise<void> {
     return request<void>(`/api/v1/favorites/${encodeURIComponent(foodId)}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ---- Meal templates (#70) ----
+
+export const mealTemplatesApi = {
+  list(): Promise<MealTemplate[]> {
+    return request<MealTemplate[]>("/api/v1/meal-templates");
+  },
+  /** Snapshot the foods already logged in a day's meal slot into a reusable template. */
+  saveFromDay(name: string, date: string, mealSlot: MealSlot): Promise<MealTemplate> {
+    return request<MealTemplate>("/api/v1/meal-templates/from-day", {
+      method: "POST",
+      body: { name, date, mealSlot },
+    });
+  },
+  /** Log a saved template's foods into a day's meal slot. Returns how many entries were created. */
+  log(id: string, date: string, mealSlot: MealSlot): Promise<{ logged: number }> {
+    return request<{ logged: number }>(
+      `/api/v1/meal-templates/${encodeURIComponent(id)}/log`,
+      { method: "POST", body: { date, mealSlot } },
+    );
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/meal-templates/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
   },

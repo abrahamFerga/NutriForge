@@ -678,6 +678,70 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json)).GetArrayLength());
     }
 
+    /// <summary>Meal templates (#70): create a saved meal, log it in one tap, then delete it.</summary>
+    [Fact]
+    public async Task Meal_template_saves_a_combination_of_foods_and_logs_it_in_one_tap()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"tmpl-{Guid.NewGuid():N}");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var foods = await client.GetFromJsonAsync<JsonElement>("/api/v1/foods/search?q=egg", Json);
+        var egg = foods[0];
+        var foodId = egg.GetProperty("id").GetString();
+        var portionId = egg.GetProperty("portions").EnumerateArray().First().GetProperty("id").GetString();
+
+        // Create a saved meal of two items.
+        string templateId;
+        using (var create = new HttpRequestMessage(HttpMethod.Post, "/api/v1/meal-templates")
+        {
+            Content = JsonContent.Create(new
+            {
+                name = "Usual breakfast",
+                items = new[]
+                {
+                    new { foodId, portionId, quantity = 2.0 },
+                    new { foodId, portionId = (string?)null, quantity = 30.0 },
+                },
+            }, options: Json),
+        })
+        {
+            create.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(create);
+            Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+            var dto = await r.Content.ReadFromJsonAsync<JsonElement>(Json);
+            templateId = dto.GetProperty("id").GetString()!;
+            Assert.Equal(2, dto.GetProperty("items").GetArrayLength());
+        }
+
+        // It's listed.
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/v1/meal-templates", Json);
+        Assert.Contains(list.EnumerateArray(), t => t.GetProperty("id").GetString() == templateId);
+
+        // One-tap log into today's lunch → two diary entries.
+        using (var log = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/meal-templates/{templateId}/log")
+        {
+            Content = JsonContent.Create(new { date = today, mealSlot = "Lunch" }, options: Json),
+        })
+        {
+            log.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(log);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(2, (await r.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("logged").GetInt32());
+        }
+
+        var day = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diary?date={today}", Json);
+        Assert.Equal(2, day.GetProperty("entries").EnumerateArray().Count(e => e.GetProperty("mealSlot").GetString() == "Lunch"));
+
+        // Delete it.
+        using (var del = await client.DeleteAsync($"/api/v1/meal-templates/{templateId}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        var after = await client.GetFromJsonAsync<JsonElement>("/api/v1/meal-templates", Json);
+        Assert.DoesNotContain(after.EnumerateArray(), t => t.GetProperty("id").GetString() == templateId);
+    }
+
     /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>
     [Fact]
     public async Task Photo_parse_degrades_gracefully_without_a_vision_provider()

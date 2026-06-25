@@ -17,7 +17,61 @@ public static class TrackingEndpoints
         MapDiary(app);
         MapMeasurements(app);
         MapFavorites(app);
+        MapMealTemplates(app);
         return app;
+    }
+
+    private static void MapMealTemplates(IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/v1/meal-templates")
+            .RequireAuthorization(Policies.OwnerOnly).WithTags("MealTemplates");
+
+        group.MapGet("/", async (ICurrentUser user, MealTemplateService templates, CancellationToken ct) =>
+            Results.Ok(await templates.ListAsync(user.CurrentUserId(), ct)))
+            .WithName("ListMealTemplates");
+
+        // Create from an explicit set of foods, or by snapshotting a day's meal (when `date` is set).
+        group.MapPost("/", async (CreateMealTemplateRequest req, ICurrentUser user, MealTemplateService templates, CancellationToken ct) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Name) || req.Items is not { Count: > 0 })
+            {
+                return Results.Problem(title: "A name and at least one food are required.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var created = await templates.CreateAsync(user.CurrentUserId(), req.Name, req.Items, ct);
+            return created is null
+                ? Results.Problem(title: "None of the foods are in the catalog.", statusCode: StatusCodes.Status400BadRequest)
+                : Results.Created($"/api/v1/meal-templates/{created.Id}", created);
+        }).WithName("CreateMealTemplate");
+
+        group.MapPost("/from-day", async (SaveMealFromDayRequest req, ICurrentUser user, MealTemplateService templates, CancellationToken ct) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Name))
+            {
+                return Results.Problem(title: "A name is required.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var created = await templates.CreateFromDayAsync(user.CurrentUserId(), req.Name, req.Date, req.MealSlot, ct);
+            return created is null
+                ? Results.Problem(title: "That meal has no logged foods to save.", statusCode: StatusCodes.Status400BadRequest)
+                : Results.Created($"/api/v1/meal-templates/{created.Id}", created);
+        }).WithName("CreateMealTemplateFromDay");
+
+        // Log a saved meal into a day's slot (defaults to today). Returns how many entries were created.
+        group.MapPost("/{id:guid}/log", async (Guid id, LogMealTemplateRequest req, ICurrentUser user, MealTemplateService templates, IClock clock, CancellationToken ct) =>
+        {
+            if (req is null)
+            {
+                return Results.Problem(title: "A meal slot is required.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var logged = await templates.LogAsync(user.CurrentUserId(), id, req.Date ?? clock.Today, req.MealSlot, ct);
+            return logged is null ? Results.NotFound() : Results.Ok(new { logged = logged.Value });
+        }).WithName("LogMealTemplate");
+
+        group.MapDelete("/{id:guid}", async (Guid id, ICurrentUser user, MealTemplateService templates, CancellationToken ct) =>
+            await templates.DeleteAsync(user.CurrentUserId(), id, ct) ? Results.NoContent() : Results.NotFound())
+            .WithName("DeleteMealTemplate");
     }
 
     private static void MapFavorites(IEndpointRouteBuilder app)

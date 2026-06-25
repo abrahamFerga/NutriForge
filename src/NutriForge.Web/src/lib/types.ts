@@ -177,6 +177,28 @@ export interface QuickAddFood {
   proteinG: number;
 }
 
+// ---- Meal templates (#70) ----
+
+/** One food in a saved meal, with its stored portion/quantity and computed per-item kcal. */
+export interface MealTemplateItem {
+  foodId: string;
+  foodName: string;
+  portionId: string | null;
+  portionName: string;
+  quantity: number;
+  kcal: number;
+  proteinG: number;
+}
+
+/** A reusable combination of foods the user can log in one tap. */
+export interface MealTemplate {
+  id: string;
+  name: string;
+  items: MealTemplateItem[];
+  kcal: number;
+  proteinG: number;
+}
+
 // ---- Photo food logging ----
 
 /** A food recognized in a meal photo: a trusted catalog match, or a flagged AI estimate. */

@@ -26,6 +26,7 @@ import {
 } from "@/hooks/useQueries";
 import { ApiError, diaryApi, foodsApi } from "@/lib/api";
 import { QuickAddCard } from "@/components/QuickAddCard";
+import { MealTemplatesCard } from "@/components/MealTemplatesCard";
 import { queryKeys } from "@/lib/queryKeys";
 import {
   MEAL_SLOTS,
@@ -110,6 +111,8 @@ export function Diary() {
       {copyYesterday.isError ? <ErrorState error={copyYesterday.error} /> : null}
 
       <QuickAddCard date={date} mealSlot={mealSlot} onLogged={invalidateDay} />
+
+      <MealTemplatesCard date={date} mealSlot={mealSlot} onLogged={invalidateDay} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Add food: Search | Describe | Barcode */}
