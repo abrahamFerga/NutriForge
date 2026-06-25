@@ -23,6 +23,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, LoadingState } from "@/components/StateMessage";
 import { useDebounced } from "@/hooks/useQueries";
 import { ApiError, isAdmin, recipesApi, setDevRole } from "@/lib/api";
+import { authEnabled } from "@/lib/auth";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   CreateRecipeIngredient,
@@ -60,6 +61,9 @@ function OwnerBadge({ isGlobal, isMine }: { isGlobal: boolean; isMine: boolean }
 function AdminToggle() {
   const qc = useQueryClient();
   const [admin, setAdmin] = useState(isAdmin());
+
+  // Under real OIDC, admin comes from the token's `admin` role, not this dev switch — so hide it.
+  if (authEnabled) return null;
 
   return (
     <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 text-xs text-slate-400">

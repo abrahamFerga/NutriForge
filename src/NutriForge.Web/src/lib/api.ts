@@ -33,6 +33,7 @@ import type {
   TrendPoint,
   UpdateProfileRequest,
 } from "./types";
+import { getAuthHeaders } from "./auth";
 
 /**
  * Base URL for the backend API.
@@ -44,32 +45,9 @@ const RAW_BASE = import.meta.env.VITE_API_BASE;
 export const API_BASE: string =
   RAW_BASE === undefined ? "http://localhost:5000" : RAW_BASE;
 
-/**
- * Dev-auth role toggle. The dev-auth scheme sends `X-Debug-Role`; real auth (B2C/custom) will replace
- * this. Persisted in localStorage so an operator can act as an admin (e.g. to curate global recipes)
- * without a separate login. Defaults to "user".
- */
-const DEV_ROLE_KEY = "nf-debug-role";
-
-export function getDevRole(): "user" | "admin" {
-  try {
-    return localStorage.getItem(DEV_ROLE_KEY) === "admin" ? "admin" : "user";
-  } catch {
-    return "user";
-  }
-}
-
-export function setDevRole(role: "user" | "admin"): void {
-  try {
-    localStorage.setItem(DEV_ROLE_KEY, role);
-  } catch {
-    /* localStorage unavailable — ignore */
-  }
-}
-
-export function isAdmin(): boolean {
-  return getDevRole() === "admin";
-}
+// Auth (dev-auth headers or an OIDC Bearer token) is owned by ./auth. Re-exported here so existing
+// callers keep importing the role helpers from "@/lib/api".
+export { getDevRole, setDevRole, isAdmin } from "./auth";
 
 // RFC9457 problem+json shape (partial).
 interface ProblemDetails {
@@ -105,11 +83,10 @@ function buildUrl(path: string): string {
   return `${API_BASE.replace(/\/$/, "")}${path}`;
 }
 
-function buildHeaders(method: string, hasBody: boolean): Headers {
+async function buildHeaders(method: string, hasBody: boolean): Promise<Headers> {
   const headers = new Headers();
-  // Dev-auth scheme — sent on every request for local development.
-  headers.set("X-Debug-Subject", "demo-user");
-  headers.set("X-Debug-Role", getDevRole());
+  // Auth: an OIDC Bearer token when a provider is configured, else the dev-auth debug headers.
+  await applyAuth(headers);
   headers.set("Accept", "application/json");
 
   if (hasBody) {
@@ -119,6 +96,13 @@ function buildHeaders(method: string, hasBody: boolean): Headers {
     headers.set("Idempotency-Key", crypto.randomUUID());
   }
   return headers;
+}
+
+/** Merge the current auth headers (Bearer or dev) onto a Headers object. */
+async function applyAuth(headers: Headers): Promise<void> {
+  for (const [key, value] of Object.entries(await getAuthHeaders())) {
+    headers.set(key, value);
+  }
 }
 
 function formatProblem(problem: ProblemDetails, fallback: string): string {
@@ -142,7 +126,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const response = await fetch(buildUrl(path), {
     method,
-    headers: buildHeaders(method, hasBody),
+    headers: await buildHeaders(method, hasBody),
     body: hasBody ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
   });
@@ -268,8 +252,7 @@ export const diaryApi = {
     date: string,
   ): Promise<PhotoAnalysisResult> {
     const headers = new Headers();
-    headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", getDevRole());
+    await applyAuth(headers);
     headers.set("Accept", "application/json");
     headers.set("Idempotency-Key", crypto.randomUUID());
     // No Content-Type: the browser sets the multipart boundary for FormData.
@@ -425,8 +408,7 @@ export const dietPlansApi = {
   /** Fetches the printable meal-prep PDF as a Blob (dev-auth headers can't ride a plain link). */
   async pdf(id: string): Promise<Blob> {
     const headers = new Headers();
-    headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", getDevRole());
+    await applyAuth(headers);
     headers.set("Accept", "application/pdf");
 
     const response = await fetch(
@@ -515,8 +497,7 @@ export const assistantApi = {
     signal?: AbortSignal,
   ): Promise<void> {
     const headers = new Headers();
-    headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", getDevRole());
+    await applyAuth(headers);
     headers.set("Content-Type", "application/json");
     headers.set("Accept", "text/event-stream");
     headers.set("Idempotency-Key", crypto.randomUUID());

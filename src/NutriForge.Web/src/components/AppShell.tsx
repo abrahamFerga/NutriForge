@@ -5,11 +5,13 @@ import {
   CalendarRange,
   ChefHat,
   LayoutDashboard,
+  LogOut,
   MessageCircle,
   User,
   Utensils,
 } from "lucide-react";
 import { AssistantPanel } from "@/components/AssistantPanel";
+import { authEnabled, logout } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -127,6 +129,15 @@ function TopBar() {
           </span>
           <span className="text-sm text-slate-300">demo-user</span>
         </div>
+        {authEnabled ? (
+          <button
+            onClick={() => logout()}
+            aria-label="Sign out"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-100"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
     </header>
   );
