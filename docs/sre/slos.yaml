@@ -1,0 +1,117 @@
+# NutriForge SLOs + Error-Budget Policy
+# Closes #52.
+#
+# Measurement window: 28-day rolling (aligned to the Prometheus range recommended by SRE workbook).
+# Source metrics: OpenTelemetry exported to Azure Monitor / Prometheus via the ServiceDefaults meter.
+# Product KPI instruments are in the "NutriForge" meter (see NutriForgeMetrics.cs).
+
+service: nutriforge-api
+version: "1.0"
+
+slos:
+
+  # ── Availability ──────────────────────────────────────────────────────────
+  - id: api-availability
+    title: API Availability
+    description: >
+      Fraction of HTTP requests to /api/** that return a non-5xx status code,
+      measured over the 28-day window. 4xx (client errors) count as good.
+    indicator:
+      type: request-based
+      good_requests: http_server_request_duration_seconds_count{status_code!~"5.."}
+      total_requests: http_server_request_duration_seconds_count
+    target: 0.995            # 99.5 % → ≤ 3 h 21 m downtime/28 days
+    error_budget_minutes: 201  # (1 - 0.995) * 28 * 24 * 60
+
+  # ── API Latency (non-AI) ──────────────────────────────────────────────────
+  - id: api-latency-p99
+    title: API Latency p99 (non-AI endpoints)
+    description: >
+      99th-percentile response time for all API endpoints EXCEPT
+      /api/v1/diet-plan/generate and /api/v1/assistant/* which involve
+      external LLM calls and are covered by the AI-latency SLO below.
+    indicator:
+      type: window-based
+      metric: http_server_request_duration_seconds
+      percentile: 99
+      exclude_routes:
+        - /api/v1/diet-plan/generate
+        - /api/v1/assistant/*
+    threshold_seconds: 2.0
+    target: 0.99             # 99 % of requests under 2 s
+    error_budget_minutes: 403
+
+  # ── Diary log latency (product CUJ) ──────────────────────────────────────
+  - id: diary-log-latency-p95
+    title: Diary Entry Log Latency p95
+    description: >
+      95th-percentile latency for POST /api/v1/tracking/diary (the most
+      frequent user action). Measured via the http_server_request_duration_seconds
+      histogram filtered to route = '/api/v1/tracking/diary'.
+    indicator:
+      type: window-based
+      metric: http_server_request_duration_seconds{route="/api/v1/tracking/diary"}
+      percentile: 95
+    threshold_seconds: 0.5
+    target: 0.995
+
+  # ── Plan generation latency (AI path) ────────────────────────────────────
+  - id: plan-gen-latency-p95
+    title: Diet Plan Generation Latency p95
+    description: >
+      95th-percentile end-to-end time for a plan to reach COMPLETED state,
+      measured from the nutriforge.plan.generation_duration histogram.
+      LLM response time dominates; threshold is intentionally generous.
+    indicator:
+      type: window-based
+      metric: nutriforge_plan_generation_duration_seconds  # the NutriForge OTel histogram
+      percentile: 95
+    threshold_seconds: 45.0
+    target: 0.95
+    error_budget_minutes: 2016   # 5 % of 28 days
+
+  # ── Plan feasibility (correctness KPI) ───────────────────────────────────
+  - id: plan-feasibility
+    title: Diet Plan Feasibility Rate
+    description: >
+      Fraction of generated plans where feasible=true (solver found a
+      solution within ±10 % of the kcal target). A sustained drop signals
+      a regression in the MealSelectAgent or the constraint set.
+    indicator:
+      type: event-based
+      good_events: nutriforge_plan_generated_total{feasible="true"}
+      total_events: nutriforge_plan_generated_total
+    target: 0.90             # 90 % of plans must be feasible
+
+error_budget_policy:
+
+  burn_rate_alerts:
+    # Fast burn: page immediately — budget will be exhausted in ~5 h if sustained.
+    - name: fast-burn
+      description: "5 × burn rate over a 1-h window AND a 5-min window (double trigger)."
+      burn_rate: 5
+      short_window: 5m
+      long_window: 1h
+      severity: critical
+      action: page-on-call
+
+    # Slow burn: ticket for the next working day — budget will last ~5 days at this rate.
+    - name: slow-burn
+      description: "2 × burn rate sustained over a 6-h window."
+      burn_rate: 2
+      window: 6h
+      severity: warning
+      action: create-ticket
+
+  freeze_on_budget_exhaustion:
+    enabled: true
+    description: >
+      When any SLO's error budget drops below 10 %, non-critical deploys
+      are frozen until the budget recovers above 50 %. Critical security
+      patches may bypass the freeze with engineering-lead approval.
+
+  toil_review_trigger:
+    description: >
+      When any SLO misses its target for two consecutive 28-day windows,
+      trigger a structured toil-review to address the root cause before
+      the next release.
