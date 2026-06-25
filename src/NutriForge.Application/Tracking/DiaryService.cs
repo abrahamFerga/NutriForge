@@ -118,6 +118,62 @@ public sealed class DiaryService(IAppDbContext db, ICatalogDbContext catalog, Ta
             MacroTuple.From(remaining));
     }
 
+    /// <summary>
+    /// Distinct recently-logged foods (most recent first) as one-tap re-log candidates, carrying the
+    /// portion + quantity last used so re-logging reproduces the same entry.
+    /// </summary>
+    public async Task<IReadOnlyList<QuickAddFoodDto>> RecentFoodsAsync(Guid userId, int limit, CancellationToken ct = default)
+    {
+        limit = Math.Clamp(limit, 1, 50);
+        var recent = await db.DiaryEntries.AsNoTracking()
+            .Where(e => e.UserId == userId)
+            .OrderByDescending(e => e.Date).ThenByDescending(e => e.CreatedAt)
+            .Take(300) // bound the scan; dedup to distinct (food, portion) below
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        return recent
+            .GroupBy(e => (e.FoodId, e.PortionId))
+            .Select(g => g.First()) // most recent in each group (the list is already newest-first)
+            .Take(limit)
+            .Select(e => new QuickAddFoodDto(e.FoodId, e.FoodName, e.PortionId, e.PortionName, e.Quantity, e.Kcal, e.ProteinG))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Copy every entry from one day onto another (re-resolving + re-snapshotting current nutrition).
+    /// Foods that have since left the catalog are skipped. Returns how many entries were copied.
+    /// </summary>
+    public async Task<int> CopyDayAsync(Guid userId, DateOnly from, DateOnly to, CancellationToken ct = default)
+    {
+        if (from == to)
+        {
+            return 0;
+        }
+
+        var source = await db.DiaryEntries.AsNoTracking()
+            .Where(e => e.UserId == userId && e.Date == from)
+            .OrderBy(e => e.MealSlot).ThenBy(e => e.Sequence)
+            .ToListAsync(ct).ConfigureAwait(false);
+
+        var copied = 0;
+        foreach (var e in source)
+        {
+            try
+            {
+                // AddAsync saves each entry, so the next one's sequence is computed correctly.
+                await AddAsync(userId, new AddDiaryEntryRequest(to, e.MealSlot, e.FoodId, e.PortionId, e.Quantity), ct)
+                    .ConfigureAwait(false);
+                copied++;
+            }
+            catch (FoodNotFoundException)
+            {
+                // A food removed from the catalog since — skip it, copy the rest.
+            }
+        }
+
+        return copied;
+    }
+
     public async Task<IReadOnlyList<TrendDayDto>> GetTrendAsync(
         Guid userId, DateOnly endDate, int days = 7, CancellationToken ct = default)
     {

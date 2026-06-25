@@ -41,6 +41,15 @@ public sealed record MacroTuple(double Kcal, double ProteinG, double FatG, doubl
 /// <summary>One day in the weekly trend: consumed kcal vs. target kcal.</summary>
 public sealed record TrendDayDto(DateOnly Date, double Kcal, double TargetKcal);
 
+/// <summary>
+/// A one-tap re-loggable food (a recent entry or a favorite) — carries the food + portion + quantity
+/// so the SPA can POST it to /diary directly, with the per-entry kcal for display.
+/// </summary>
+public sealed record QuickAddFoodDto(
+    Guid FoodId, string FoodName, Guid? PortionId, string PortionName, double Quantity, double Kcal, double ProteinG);
+
+public sealed record CopyDayRequest(DateOnly? From, DateOnly? To);
+
 internal static class DiaryMappings
 {
     public static DiaryEntryDto ToDto(this DiaryEntry e) => new(

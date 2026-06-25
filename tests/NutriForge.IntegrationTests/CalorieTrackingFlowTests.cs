@@ -590,6 +590,73 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(0, (await other.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json)).GetArrayLength());
     }
 
+    /// <summary>Quick-add (#69): recents, favorites (add/list/remove), and a server-side copy-day.</summary>
+    [Fact]
+    public async Task Quick_add_recents_favorites_and_copy_day()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"quick-{Guid.NewGuid():N}");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var todayStr = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var yStr = today.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var foods = await client.GetFromJsonAsync<JsonElement>("/api/v1/foods/search?q=egg", Json);
+        var egg = foods[0];
+        var foodId = egg.GetProperty("id").GetString();
+        var portionId = egg.GetProperty("portions").EnumerateArray().First().GetProperty("id").GetString();
+
+        // Log the egg yesterday.
+        using (var log = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diary")
+        {
+            Content = JsonContent.Create(new { date = yStr, mealSlot = "Breakfast", foodId, portionId, quantity = 2.0 }, options: Json),
+        })
+        {
+            log.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(log);
+            Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+        }
+
+        // Recents include it.
+        var recents = await client.GetFromJsonAsync<JsonElement>("/api/v1/diary/recents?limit=10", Json);
+        Assert.Contains(recents.EnumerateArray(), f => f.GetProperty("foodId").GetString() == foodId);
+
+        // Favorite it → it appears in favorites; favoriting an unknown food is 404.
+        using (var fav = await Post(client, $"/api/v1/favorites/{foodId}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, fav.StatusCode);
+        }
+
+        var favorites = await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json);
+        Assert.Contains(favorites.EnumerateArray(), f => f.GetProperty("foodId").GetString() == foodId);
+
+        using (var bad = await Post(client, $"/api/v1/favorites/{Guid.NewGuid()}"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, bad.StatusCode);
+        }
+
+        // Copy yesterday → today.
+        using (var copy = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diary/copy")
+        {
+            Content = JsonContent.Create(new { from = yStr, to = todayStr }, options: Json),
+        })
+        {
+            copy.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(copy);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(1, (await r.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("copied").GetInt32());
+        }
+
+        var day = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diary?date={todayStr}", Json);
+        Assert.Equal(1, day.GetProperty("entries").GetArrayLength());
+
+        // Unfavorite.
+        using (var del = await client.DeleteAsync($"/api/v1/favorites/{foodId}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json)).GetArrayLength());
+    }
+
     /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>
     [Fact]
     public async Task Photo_parse_degrades_gracefully_without_a_vision_provider()

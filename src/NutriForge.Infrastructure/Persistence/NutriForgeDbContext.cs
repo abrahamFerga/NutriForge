@@ -43,6 +43,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Target> Targets => Set<Target>();
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
     public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
+    public DbSet<FavoriteFood> FavoriteFoods => Set<FavoriteFood>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
@@ -208,6 +209,14 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(m => m.Id);
             e.HasIndex(m => new { m.UserId, m.Date }).IsUnique(); // one entry per day per user
             e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        b.Entity<FavoriteFood>(e =>
+        {
+            e.ToTable("favorite_foods", "app");
+            e.HasKey(f => f.Id);
+            e.HasIndex(f => new { f.UserId, f.FoodId }).IsUnique(); // at most one per (user, food)
+            e.HasQueryFilter(f => f.UserId == CurrentUserId);
         });
 
         b.Entity<AssistantSession>(e =>

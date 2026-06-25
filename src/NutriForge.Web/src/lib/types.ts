@@ -166,6 +166,17 @@ export interface CreateDiaryEntryRequest {
   quantity: number;
 }
 
+/** A one-tap re-loggable food (recent or favorite). #69 */
+export interface QuickAddFood {
+  foodId: string;
+  foodName: string;
+  portionId: string | null;
+  portionName: string;
+  quantity: number;
+  kcal: number;
+  proteinG: number;
+}
+
 // ---- Photo food logging ----
 
 /** A food recognized in a meal photo: a trusted catalog match, or a flagged AI estimate. */

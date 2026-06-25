@@ -16,7 +16,26 @@ public static class TrackingEndpoints
         MapTargets(app);
         MapDiary(app);
         MapMeasurements(app);
+        MapFavorites(app);
         return app;
+    }
+
+    private static void MapFavorites(IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/v1/favorites")
+            .RequireAuthorization(Policies.OwnerOnly).WithTags("Favorites");
+
+        group.MapGet("/", async (ICurrentUser user, FavoriteService favorites, CancellationToken ct) =>
+            Results.Ok(await favorites.ListAsync(user.CurrentUserId(), ct)))
+            .WithName("ListFavorites");
+
+        group.MapPost("/{foodId:guid}", async (Guid foodId, ICurrentUser user, FavoriteService favorites, CancellationToken ct) =>
+            await favorites.AddAsync(user.CurrentUserId(), foodId, ct) ? Results.NoContent() : Results.NotFound())
+            .WithName("AddFavorite");
+
+        group.MapDelete("/{foodId:guid}", async (Guid foodId, ICurrentUser user, FavoriteService favorites, CancellationToken ct) =>
+            await favorites.RemoveAsync(user.CurrentUserId(), foodId, ct) ? Results.NoContent() : Results.NotFound())
+            .WithName("RemoveFavorite");
     }
 
     private static void MapMeasurements(IEndpointRouteBuilder app)
@@ -83,6 +102,20 @@ public static class TrackingEndpoints
         group.MapGet("/trend", async (DateOnly? endDate, int? days, ICurrentUser user, DiaryService diary, IClock clock, CancellationToken ct) =>
             Results.Ok(await diary.GetTrendAsync(user.CurrentUserId(), endDate ?? clock.Today, days ?? 7, ct)))
             .WithName("GetDiaryTrend");
+
+        // Quick-add (#69): distinct recently-logged foods, for one-tap re-logging.
+        group.MapGet("/recents", async (int? limit, ICurrentUser user, DiaryService diary, CancellationToken ct) =>
+            Results.Ok(await diary.RecentFoodsAsync(user.CurrentUserId(), limit ?? 12, ct)))
+            .WithName("GetRecentFoods");
+
+        // Quick-add: copy a whole day's entries onto another day (defaults yesterday → today).
+        group.MapPost("/copy", async (CopyDayRequest? req, ICurrentUser user, DiaryService diary, IClock clock, CancellationToken ct) =>
+        {
+            var to = req?.To ?? clock.Today;
+            var from = req?.From ?? to.AddDays(-1);
+            var copied = await diary.CopyDayAsync(user.CurrentUserId(), from, to, ct);
+            return Results.Ok(new { copied, from, to });
+        }).WithName("CopyDiaryDay");
 
         group.MapPost("/", async (AddDiaryEntryRequest req, ICurrentUser user, DiaryService diary, CancellationToken ct) =>
         {

@@ -23,6 +23,7 @@ import type {
   LogMeasurementRequest,
   LogProposal,
   Measurement,
+  QuickAddFood,
   MealSlot,
   PantryItem,
   PhotoAnalysisResult,
@@ -229,6 +230,17 @@ export const diaryApi = {
   trend(days = 7): Promise<TrendPoint[]> {
     return request<TrendPoint[]>(`/api/v1/diary/trend?days=${days}`);
   },
+  /** Distinct recently-logged foods for one-tap re-logging (#69). */
+  recents(limit = 12): Promise<QuickAddFood[]> {
+    return request<QuickAddFood[]>(`/api/v1/diary/recents?limit=${limit}`);
+  },
+  /** Server-side copy of a whole day (defaults yesterday → today). */
+  copyDay(from?: string, to?: string): Promise<{ copied: number }> {
+    return request<{ copied: number }>("/api/v1/diary/copy", {
+      method: "POST",
+      body: { from, to },
+    });
+  },
   /**
    * Parses a natural-language meal description into confirmable candidates.
    * Throws {@link ApiError} with status 503 when no LLM provider is configured,
@@ -288,6 +300,25 @@ export const diaryApi = {
     }
 
     return response.json() as Promise<PhotoAnalysisResult>;
+  },
+};
+
+// ---- Favorites (#69) ----
+
+export const favoritesApi = {
+  list(): Promise<QuickAddFood[]> {
+    return request<QuickAddFood[]>("/api/v1/favorites");
+  },
+  add(foodId: string): Promise<void> {
+    return request<void>(`/api/v1/favorites/${encodeURIComponent(foodId)}`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  remove(foodId: string): Promise<void> {
+    return request<void>(`/api/v1/favorites/${encodeURIComponent(foodId)}`, {
+      method: "DELETE",
+    });
   },
 };
 

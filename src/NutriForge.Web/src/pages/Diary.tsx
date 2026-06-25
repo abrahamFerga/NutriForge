@@ -25,6 +25,7 @@ import {
   useDiary,
 } from "@/hooks/useQueries";
 import { ApiError, diaryApi, foodsApi } from "@/lib/api";
+import { QuickAddCard } from "@/components/QuickAddCard";
 import { queryKeys } from "@/lib/queryKeys";
 import {
   MEAL_SLOTS,
@@ -52,23 +53,13 @@ export function Diary() {
     setDate(toIsoDate(d));
   }
 
-  // Copy every entry from the previous day onto this day (re-logged by grams, so each gets a fresh
-  // log-time nutrition snapshot). Reuses the normal GET/POST diary endpoints — no backend change.
+  // Copy the previous day's entries onto this day in one server call (#69): it re-resolves + re-snapshots
+  // each entry's current nutrition and skips foods no longer in the catalog.
   const copyYesterday = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       const y = new Date(date + "T00:00:00");
       y.setDate(y.getDate() - 1);
-      const prev = await diaryApi.get(toIsoDate(y));
-      for (const e of prev.entries) {
-        await diaryApi.create({
-          date,
-          mealSlot: e.mealSlot,
-          foodId: e.foodId,
-          portionId: null,
-          quantity: e.grams,
-        });
-      }
-      return prev.entries.length;
+      return diaryApi.copyDay(toIsoDate(y), date);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.diary(date) });
@@ -76,6 +67,12 @@ export function Diary() {
       qc.invalidateQueries({ queryKey: queryKeys.targets });
     },
   });
+
+  function invalidateDay() {
+    qc.invalidateQueries({ queryKey: queryKeys.diary(date) });
+    qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
+    qc.invalidateQueries({ queryKey: queryKeys.targets });
+  }
 
   return (
     <div className="space-y-6">
@@ -111,6 +108,8 @@ export function Diary() {
       </div>
 
       {copyYesterday.isError ? <ErrorState error={copyYesterday.error} /> : null}
+
+      <QuickAddCard date={date} mealSlot={mealSlot} onLogged={invalidateDay} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Add food: Search | Describe | Barcode */}
