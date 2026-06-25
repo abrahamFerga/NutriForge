@@ -103,13 +103,21 @@ public static class AssistantEndpoints
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("AssistantChatStream");
 
-        // Clear the persisted conversation.
+        // Clear the persisted conversation history (PersonalContext is preserved — #77).
         group.MapDelete("/session", async (NutritionAssistantService svc, CancellationToken ct) =>
         {
             await svc.ClearAsync(ct);
             return Results.NoContent();
         })
             .WithName("ClearAssistantSession");
+
+        // Clear the user's persisted personal memory independently of the conversation (#77).
+        group.MapDelete("/memory", async (NutritionAssistantService svc, CancellationToken ct) =>
+        {
+            await svc.ClearPersonalContextAsync(ct);
+            return Results.NoContent();
+        })
+            .WithName("ClearAssistantMemory");
 
         return app;
     }

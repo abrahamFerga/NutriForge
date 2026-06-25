@@ -55,18 +55,22 @@ public sealed class NutritionAssistantService(
         CheckBudget(session, message);
 
         var agent = factory.CreateAgent(tools.ToolList());
+        var isNew = string.IsNullOrWhiteSpace(session.Data);
         var mafSession = await DeserializeOrCreateAsync(agent, session, cancellationToken).ConfigureAwait(false);
+        var enrichedMessage = isNew
+            ? await InjectContextAsync(message, session.PersonalContext, cancellationToken).ConfigureAwait(false)
+            : message;
 
         var sw = Stopwatch.StartNew();
-        var response = await agent.RunAsync(message, mafSession, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var response = await agent.RunAsync(enrichedMessage, mafSession, cancellationToken: cancellationToken).ConfigureAwait(false);
         sw.Stop();
 
         var reply = response.Text ?? string.Empty;
-        AccumulateTokens(session, message, reply);
+        AccumulateTokens(session, enrichedMessage, reply);
         await PersistSessionAsync(agent, mafSession, session, uid, cancellationToken).ConfigureAwait(false);
 
         metrics.AiTurnCompleted("ok", factory.Model,
-            EstimateTokens(message), EstimateTokens(reply), sw.Elapsed.TotalSeconds);
+            EstimateTokens(enrichedMessage), EstimateTokens(reply), sw.Elapsed.TotalSeconds);
 
         return new AssistantTurn(reply, proposals.Current);
     }
@@ -89,12 +93,16 @@ public sealed class NutritionAssistantService(
         CheckBudget(session, message);
 
         var agent = factory.CreateAgent(tools.ToolList());
+        var isNew = string.IsNullOrWhiteSpace(session.Data);
         var mafSession = await DeserializeOrCreateAsync(agent, session, cancellationToken).ConfigureAwait(false);
+        var enrichedMessage = isNew
+            ? await InjectContextAsync(message, session.PersonalContext, cancellationToken).ConfigureAwait(false)
+            : message;
 
         var sw = Stopwatch.StartNew();
         var outputBuilder = new System.Text.StringBuilder();
 
-        await foreach (var update in agent.RunStreamingAsync(message, mafSession, cancellationToken: cancellationToken)
+        await foreach (var update in agent.RunStreamingAsync(enrichedMessage, mafSession, cancellationToken: cancellationToken)
             .ConfigureAwait(false))
         {
             var text = update.Text;
@@ -107,16 +115,20 @@ public sealed class NutritionAssistantService(
 
         sw.Stop();
         var outputText = outputBuilder.ToString();
-        AccumulateTokens(session, message, outputText);
+        AccumulateTokens(session, enrichedMessage, outputText);
         await PersistSessionAsync(agent, mafSession, session, uid, cancellationToken).ConfigureAwait(false);
 
         metrics.AiTurnCompleted("ok", factory.Model,
-            EstimateTokens(message), EstimateTokens(outputText), sw.Elapsed.TotalSeconds);
+            EstimateTokens(enrichedMessage), EstimateTokens(outputText), sw.Elapsed.TotalSeconds);
     }
 
     /// <summary>The proposal produced during the last streamed turn (read by the endpoint after the stream).</summary>
     public LogProposal? PendingProposal => proposals.Current;
 
+    /// <summary>
+    /// Clears the MAF conversation history (Data) but preserves PersonalContext so remembered
+    /// preferences survive across chat resets (#77).
+    /// </summary>
     public async Task ClearAsync(CancellationToken cancellationToken)
     {
         var uid = CurrentUserId();
@@ -124,7 +136,20 @@ public sealed class NutritionAssistantService(
             .ConfigureAwait(false);
         if (stored is not null)
         {
-            db.AssistantSessions.Remove(stored);
+            stored.Data = string.Empty;
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Clears the user's persisted personal memory without touching the conversation history.</summary>
+    public async Task ClearPersonalContextAsync(CancellationToken cancellationToken)
+    {
+        var uid = CurrentUserId();
+        var stored = await db.AssistantSessions.FirstOrDefaultAsync(s => s.UserId == uid, cancellationToken)
+            .ConfigureAwait(false);
+        if (stored is not null)
+        {
+            stored.PersonalContext = null;
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
     }
@@ -206,6 +231,30 @@ public sealed class NutritionAssistantService(
 
     private static long EstimateTokens(string text) =>
         string.IsNullOrEmpty(text) ? 0L : Math.Max(1L, text.Length / 4);
+
+    /// <summary>
+    /// Prepends a [Context] block to the first message of a new MAF session (#79/#77).
+    /// Swallows any exception so a diary outage never blocks the chat.
+    /// </summary>
+    private async Task<string> InjectContextAsync(string message, string? personalContext, CancellationToken ct)
+    {
+        try
+        {
+            var prefix = await tools.BuildSessionContextAsync(personalContext, ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(prefix))
+            {
+                return prefix + "\n\n" + message;
+            }
+        }
+#pragma warning disable CA1031 // best-effort; a diary outage must not prevent the chat from starting
+        catch
+        {
+            // swallow — use original message
+        }
+#pragma warning restore CA1031
+
+        return message;
+    }
 
     private async Task<AssistantSession> LoadOrCreateStoredSessionAsync(Guid uid, CancellationToken ct)
     {

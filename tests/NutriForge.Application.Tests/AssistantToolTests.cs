@@ -51,14 +51,14 @@ public sealed class AssistantToolTests
         var foods = new FoodService(db, new NoOpCache());
         var diary = new DiaryService(db, db, targets);
         var holder = new LogProposalHolder();
-        var tools = new AssistantTools(foods, targets, diary, profiles, new FakeCurrentUser(userId), Clock, holder);
+        var tools = new AssistantTools(foods, targets, diary, profiles, new FakeCurrentUser(userId), Clock, holder, db);
         return (tools, holder);
     }
 
     [Fact]
     public void Tool_surface_exposes_the_read_tools_and_propose_log()
     {
-        var tools = new AssistantTools(null!, null!, null!, null!, new FakeCurrentUser(Guid.NewGuid()), Clock, new LogProposalHolder());
+        var tools = new AssistantTools(null!, null!, null!, null!, new FakeCurrentUser(Guid.NewGuid()), Clock, new LogProposalHolder(), null!);
         var names = tools.ToolList().OfType<AIFunction>().Select(f => f.Name).ToHashSet();
 
         Assert.Contains("SearchFoods", names);
@@ -66,6 +66,7 @@ public sealed class AssistantToolTests
         Assert.Contains("GetTodaySummary", names);
         Assert.Contains("GetProfile", names);
         Assert.Contains("ProposeLogFood", names);
+        Assert.Contains("RememberUserFact", names);
     }
 
     [Fact]
