@@ -22,6 +22,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IFoodPhotoParser, Assistant.FoodPhotoParser>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IRecipeExtractor, Assistant.RecipeExtractor>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IDietIntentParser, Assistant.DietIntentParser>();
+        // SELECT agent (#36) — when present, the diet generator lets it compose the meal selection.
+        builder.Services.AddScoped<NutriForge.Application.DietGen.IMealSelectAgent, Assistant.MealSelectAgent>();
 
         return builder;
     }

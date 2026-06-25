@@ -94,7 +94,7 @@ public sealed class DietPlanService(
             : await catalog.DietTypes.AsNoTracking().FirstOrDefaultAsync(d => d.Slug == intent.DietSlug, ct).ConfigureAwait(false);
 
         var pool = RecipeFilter.Filter(recipes, intent, diet);
-        var result = generator.Generate(pool, intent, plan.TargetKcal);
+        var result = await generator.GenerateAsync(pool, intent, plan.TargetKcal, ct).ConfigureAwait(false);
 
         plan.ClearSlots();
         foreach (var s in result.Slots)

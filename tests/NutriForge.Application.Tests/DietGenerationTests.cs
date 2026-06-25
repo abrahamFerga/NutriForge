@@ -133,4 +133,106 @@ public sealed class DietGenerationTests
         Assert.False(result.Feasible);
         Assert.Contains("allergen-safe", result.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ---- SELECT agent (#36) ----
+
+    private static Recipe[] VeganPool() =>
+    [
+        Rec("Vegan bowl A", ["vegan"], ("tofu", new Macros(400, 30, 12, 30))),
+        Rec("Vegan bowl B", ["vegan"], ("beans", new Macros(600, 25, 10, 80))),
+        Rec("Vegan bowl C", ["vegan"], ("oats", new Macros(500, 18, 9, 70))),
+    ];
+
+    private static List<MealSelection> FullSelection(
+        IReadOnlyList<Recipe> pool, int numBlocks, int mealsPerDay, Func<Recipe> pick)
+    {
+        var meals = new[] { MealSlot.Breakfast, MealSlot.Lunch, MealSlot.Dinner, MealSlot.Snack }.Take(mealsPerDay).ToArray();
+        var list = new List<MealSelection>();
+        for (var block = 1; block <= numBlocks; block++)
+        {
+            foreach (var meal in meals)
+            {
+                list.Add(new MealSelection(block, meal, pick().Id));
+            }
+        }
+
+        return list;
+    }
+
+    [Fact]
+    public async Task GenerateAsync_uses_the_agent_selection_when_it_covers_the_grid()
+    {
+        var pool = VeganPool();
+        var chosen = pool[^1]; // the agent picks the SAME recipe everywhere — greedy would rotate all three.
+        var agent = new FakeSelectAgent(configured: true, (p, blocks, meals) => FullSelection(p, blocks, meals, () => chosen));
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer(), agent);
+        var intent = new DietIntent(2000, null, "vegan", [], null, MealsPerDay: 3, HorizonDays: 7);
+
+        var result = await generator.GenerateAsync(pool, intent, 2000);
+
+        Assert.True(result.Feasible, result.Message);
+        Assert.Equal(21, result.Slots.Count);
+        Assert.All(result.Slots, s => Assert.Equal(chosen.Name, s.Recipe.Name));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_falls_back_to_greedy_when_the_agent_proposal_is_unusable()
+    {
+        var pool = VeganPool();
+        // A single pick for an unknown recipe id can't complete the grid ⇒ fall back wholesale.
+        var agent = new FakeSelectAgent(configured: true,
+            (_, _, _) => [new MealSelection(1, MealSlot.Breakfast, Guid.NewGuid())]);
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer(), agent);
+        var intent = new DietIntent(2000, null, "vegan", [], null, MealsPerDay: 3, HorizonDays: 7);
+
+        var viaAgent = await generator.GenerateAsync(pool, intent, 2000);
+        var greedy = generator.Generate(pool, intent, 2000);
+
+        Assert.Equal(
+            greedy.Slots.Select(s => s.Recipe.Name).ToArray(),
+            viaAgent.Slots.Select(s => s.Recipe.Name).ToArray());
+        Assert.Equal(greedy.Feasible, viaAgent.Feasible);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_refuses_an_allergen_unsafe_recipe_even_when_the_agent_picks_it()
+    {
+        // Defense in depth survives the agent path: the agent actively chooses an excluded recipe, and
+        // the final allergen re-check still refuses the plan.
+        var mushroom = Rec("Mushroom risotto", [], ("mushroom", new Macros(500, 12, 14, 70)));
+        var agent = new FakeSelectAgent(configured: true, (p, blocks, meals) => FullSelection(p, blocks, meals, () => mushroom));
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer(), agent);
+        var intent = new DietIntent(2000, null, null, ["mushroom"], null, MealsPerDay: 3, HorizonDays: 7);
+
+        var result = await generator.GenerateAsync([mushroom], intent, 2000);
+
+        Assert.False(result.Feasible);
+        Assert.Contains("allergen-safe", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_without_a_configured_agent_matches_deterministic_generation()
+    {
+        var pool = VeganPool();
+        var intent = new DietIntent(2000, null, "vegan", [], null, MealsPerDay: 3, HorizonDays: 7);
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer(), new FakeSelectAgent(configured: false));
+
+        var viaAsync = await generator.GenerateAsync(pool, intent, 2000);
+        var sync = generator.Generate(pool, intent, 2000);
+
+        Assert.Equal(sync.Slots.Select(s => s.Recipe.Name), viaAsync.Slots.Select(s => s.Recipe.Name));
+        Assert.Equal(sync.Feasible, viaAsync.Feasible);
+        Assert.Equal(sync.DailyAverage.Kcal, viaAsync.DailyAverage.Kcal, precision: 3);
+    }
+
+    private sealed class FakeSelectAgent(
+        bool configured,
+        Func<IReadOnlyList<Recipe>, int, int, IReadOnlyList<MealSelection>?>? select = null) : IMealSelectAgent
+    {
+        public bool IsConfigured => configured;
+
+        public Task<IReadOnlyList<MealSelection>?> SelectAsync(
+            IReadOnlyList<Recipe> pool, DietIntent intent, int numBlocks, int mealsPerDay, CancellationToken ct = default)
+            => Task.FromResult(select?.Invoke(pool, numBlocks, mealsPerDay));
+    }
 }
