@@ -407,7 +407,7 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4)); // PDF magic number
     }
 
-    /// <summary>Recipe import is wired and degrades to 503 when no AI provider is configured.</summary>
+    /// <summary>A YouTube import still needs the AI extractor (the description is messy text) — 503 without it.</summary>
     [Fact]
     public async Task Recipe_import_preview_degrades_to_503_without_a_provider()
     {
@@ -415,6 +415,33 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         using var res = await client.PostAsJsonAsync("/api/v1/recipes/import/preview",
             new { url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }, Json);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+    }
+
+    /// <summary>
+    /// Web recipe import via schema.org JSON-LD (#91) is deterministic — pasted recipe HTML produces a
+    /// draft with computed nutrition WITHOUT any AI provider configured.
+    /// </summary>
+    [Fact]
+    public async Task Recipe_import_from_pasted_json_ld_html_works_without_an_ai_provider()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"jsonld-{Guid.NewGuid():N}");
+        const string html =
+            "<html><head><script type=\"application/ld+json\">" +
+            "{\"@context\":\"https://schema.org\",\"@type\":\"Recipe\",\"name\":\"JSON-LD Bowl\"," +
+            "\"recipeYield\":\"2\",\"totalTime\":\"PT15M\"," +
+            "\"recipeIngredient\":[\"200 g chicken\",\"150 g white rice\"]," +
+            "\"recipeInstructions\":\"Cook it.\"}</script></head><body></body></html>";
+
+        using var res = await client.PostAsJsonAsync("/api/v1/recipes/import/preview", new { text = html }, Json);
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode); // deterministic path — no AI needed
+        var preview = await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+        var draft = preview.GetProperty("draft");
+        Assert.Equal("JSON-LD Bowl", draft.GetProperty("name").GetString());
+        Assert.Equal(2, draft.GetProperty("servings").GetInt32());
+        Assert.True(draft.GetProperty("ingredients").GetArrayLength() >= 2);
+        // chicken + white rice resolve against the seeded catalog ⇒ computed per-serving nutrition.
+        Assert.True(draft.GetProperty("kcalPerServing").GetDouble() > 0, "expected computed nutrition from resolved ingredients");
     }
 
     /// <summary>An imported recipe persists its source fields, and re-importing the same video dedups.</summary>

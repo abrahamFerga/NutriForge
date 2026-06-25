@@ -495,3 +495,32 @@ secret). IaC is **Terraform** (remote azurerm state); CI/CD is **GitHub Actions*
 - **AKS** — Rejected: a cluster + platform-team overhead far beyond v1's needs.
 - **ACR admin user / registry password** — Rejected: violates the no-stored-secrets guardrail;
   identity-based `AcrPull`/`AcrPush` is used instead.
+
+## ADR-0014: Web recipe import is a deterministic, SSRF-isolated connector — AI is the fallback, not the path
+
+**Status:** Accepted · **Context:** Epic 14 / #91.
+
+Importing a recipe from a web URL must not depend on an LLM (cost, latency, a required key) when the
+page already ships machine-readable data, and fetching a user-supplied URL server-side is a textbook
+SSRF vector.
+
+**Decision.**
+- **Deterministic first.** Most recipe sites embed `schema.org/Recipe` as `application/ld+json`. The
+  importer fetches the page and parses that JSON-LD (`JsonLdRecipeParser`) into the same
+  `ExtractedRecipe` the AI extractor produces, so resolve → compute → confirm → save is unchanged. The
+  AI extractor is used ONLY for inputs with no structured data (a YouTube description, free-text paste).
+  Consequence: web import works with **no API key**; only YouTube/free-text returns 503 when AI is off.
+- **Nutrition is still never trusted from the source** (ADR-0004): the parser yields names/quantities/
+  steps; the catalog resolver owns every macro.
+- **SSRF isolation.** The fetcher is a DEDICATED typed `HttpClient` (not the shared resilience client)
+  whose `SocketsHttpHandler.ConnectCallback` resolves the host, drops every loopback / private /
+  link-local / CGNAT / multicast / cloud-metadata (169.254.169.254) / IPv6-ULA address
+  (`PrivateNetworkGuard`), and connects only to a surviving public IP. Every redirect hop re-enters the
+  callback, so a public→internal redirect or DNS rebind is rejected too. Plus: http/https only, ~10s
+  timeout, ~3 MB streamed cap, HTML content-type only, faults degrade to null.
+- **ToS posture.** Only public structured metadata is read; no transcript scraping or paywalled
+  content (transcript enrichment is the separate, opt-in #93).
+
+**Alternatives rejected.** AI-only import (needless key/cost/latency for sites with JSON-LD); a host
+allowlist alone (brittle + still rebindable — the IP-level connect gate is the real control);
+the generic resilience HttpClient (its retries/redirects would bypass the per-connection SSRF gate).

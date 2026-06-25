@@ -97,21 +97,20 @@ public static class RecipeEndpoints
             if (string.IsNullOrWhiteSpace(req.Url) && string.IsNullOrWhiteSpace(req.Text))
             {
                 return Results.Problem(title: "Nothing to import",
-                    detail: "Provide a YouTube/recipe URL or pasted recipe text.", statusCode: StatusCodes.Status400BadRequest);
+                    detail: "Provide a recipe URL (web or YouTube) or pasted recipe text/HTML.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            if (!import.IsConfigured)
+            var result = await import.PreviewAsync(req, ct);
+            return result.Outcome switch
             {
-                return Results.Problem(title: "Recipe import unavailable",
-                    detail: "No AI provider is configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
-            }
-
-            var preview = await import.PreviewAsync(req, ct);
-            return preview is null
-                ? Results.Problem(title: "Couldn't extract a recipe",
-                    detail: "No recipe found. For a YouTube link with an empty description, paste the recipe text.",
-                    statusCode: StatusCodes.Status422UnprocessableEntity)
-                : Results.Ok(preview);
+                ImportOutcome.Ok => Results.Ok(result.Preview),
+                ImportOutcome.NeedsExtractor => Results.Problem(title: "Recipe import unavailable",
+                    detail: "This page has no structured recipe data, and AI extraction needs an AI provider. Paste a recipe URL with schema.org data, or the recipe text.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable),
+                _ => Results.Problem(title: "Couldn't extract a recipe",
+                    detail: "No recipe found. Try a recipe URL with structured (schema.org) data, or paste the recipe text.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity),
+            };
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("ImportRecipePreview");

@@ -182,22 +182,22 @@ function ImportPanel({ onPreview }: { onPreview: (d: ImportPreviewDto) => void }
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1">
-          <Label htmlFor="imp-url">YouTube or recipe URL</Label>
+          <Label htmlFor="imp-url">Recipe URL (web or YouTube)</Label>
           <Input
             id="imp-url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=…"
+            placeholder="https://example.com/recipe  ·  no API key needed for recipe sites"
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="imp-text">…or paste the recipe text</Label>
+          <Label htmlFor="imp-text">…or paste the recipe text / page HTML</Label>
           <textarea
             id="imp-text"
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={4}
-            placeholder="Paste ingredients + steps — handy when a video has no description"
+            placeholder="Paste ingredients + steps, or a recipe page's HTML — handy when a video has no description"
             className="flex w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30 focus-visible:outline-none"
           />
         </div>
@@ -220,8 +220,9 @@ function ImportPanel({ onPreview }: { onPreview: (d: ImportPreviewDto) => void }
           Extract recipe
         </Button>
         <p className="text-xs text-slate-500">
-          We read the video title + description (or your pasted text), extract
-          the recipe, and compute calories from the catalog. You review &amp;
+          Recipe sites are read directly from their structured data (no key
+          needed); YouTube/free text uses AI. Either way calories are computed
+          from the catalog. You review &amp;
           confirm before saving.
         </p>
       </CardContent>
