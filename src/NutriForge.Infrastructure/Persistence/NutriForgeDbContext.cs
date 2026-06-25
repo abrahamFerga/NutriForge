@@ -42,6 +42,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<Target> Targets => Set<Target>();
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
+    public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
@@ -199,6 +200,14 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(d => d.FoodName).HasMaxLength(200);
             e.Property(d => d.PortionName).HasMaxLength(100);
             e.HasQueryFilter(d => d.UserId == CurrentUserId);
+        });
+
+        b.Entity<BodyMeasurement>(e =>
+        {
+            e.ToTable("body_measurements", "app");
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => new { m.UserId, m.Date }).IsUnique(); // one entry per day per user
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
         });
 
         b.Entity<AssistantSession>(e =>

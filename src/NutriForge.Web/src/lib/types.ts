@@ -193,6 +193,22 @@ export interface TrendPoint {
   targetKcal: number;
 }
 
+// ---- Body measurements (#71) ----
+
+export interface Measurement {
+  date: string; // yyyy-MM-dd
+  weightKg: number;
+  bodyFatPct: number | null;
+  waistCm: number | null;
+}
+
+export interface LogMeasurementRequest {
+  date?: string;
+  weightKg: number;
+  bodyFatPct?: number | null;
+  waistCm?: number | null;
+}
+
 // ---- Natural-language parse ----
 
 /**

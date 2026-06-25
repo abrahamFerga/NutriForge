@@ -20,7 +20,9 @@ import type {
   FoodSummary,
   ImportPreviewDto,
   ImportRecipeRequest,
+  LogMeasurementRequest,
   LogProposal,
+  Measurement,
   MealSlot,
   PantryItem,
   PhotoAnalysisResult,
@@ -422,6 +424,22 @@ export const dietPlansApi = {
       );
     }
     return response.blob();
+  },
+};
+
+// ---- Body measurements (#71) ----
+
+export const measurementsApi = {
+  history(days = 90): Promise<Measurement[]> {
+    return request<Measurement[]>(`/api/v1/measurements?days=${days}`);
+  },
+  log(body: LogMeasurementRequest): Promise<Measurement> {
+    return request<Measurement>("/api/v1/measurements", { method: "POST", body });
+  },
+  remove(date: string): Promise<void> {
+    return request<void>(`/api/v1/measurements/${encodeURIComponent(date)}`, {
+      method: "DELETE",
+    });
   },
 };
 

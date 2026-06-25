@@ -17,6 +17,7 @@ import { Flame } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { MacroBar } from "@/components/MacroBar";
+import { WeightCard } from "@/components/WeightCard";
 import {
   EmptyState,
   ErrorState,
@@ -174,6 +175,8 @@ export function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      <WeightCard />
     </div>
   );
 }

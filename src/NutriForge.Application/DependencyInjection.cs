@@ -16,6 +16,7 @@ public static class DependencyInjection
         services.AddScoped<ProfileService>();
         services.AddScoped<TargetService>();
         services.AddScoped<DiaryService>();
+        services.AddScoped<MeasurementService>();
         services.AddScoped<DiaryParseService>();
         services.AddScoped<FoodPhotoService>();
         services.AddScoped<Recipes.RecipeService>();

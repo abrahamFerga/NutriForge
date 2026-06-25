@@ -15,7 +15,35 @@ public static class TrackingEndpoints
         MapProfile(app);
         MapTargets(app);
         MapDiary(app);
+        MapMeasurements(app);
         return app;
+    }
+
+    private static void MapMeasurements(IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/v1/measurements")
+            .RequireAuthorization(Policies.OwnerOnly).WithTags("Measurements");
+
+        // Recent history (default ~90 days), oldest-first, for a trend.
+        group.MapGet("/", async (int? days, ICurrentUser user, MeasurementService measurements, CancellationToken ct) =>
+            Results.Ok(await measurements.HistoryAsync(user.CurrentUserId(), days ?? 90, ct)))
+            .WithName("GetMeasurements");
+
+        // Log (or overwrite) today's (or a given date's) measurement.
+        group.MapPost("/", async (LogMeasurementRequest req, ICurrentUser user, MeasurementService measurements, CancellationToken ct) =>
+        {
+            if (req.WeightKg is <= 0 or > 700)
+            {
+                return Results.Problem(title: "Invalid weight", detail: "Weight must be between 0 and 700 kg.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(await measurements.LogAsync(user.CurrentUserId(), req, ct));
+        }).WithName("LogMeasurement");
+
+        group.MapDelete("/{date}", async (DateOnly date, ICurrentUser user, MeasurementService measurements, CancellationToken ct) =>
+            await measurements.DeleteAsync(user.CurrentUserId(), date, ct) ? Results.NoContent() : Results.NotFound())
+            .WithName("DeleteMeasurement");
     }
 
     private static void MapProfile(IEndpointRouteBuilder app)

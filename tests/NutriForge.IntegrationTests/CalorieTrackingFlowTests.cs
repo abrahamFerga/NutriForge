@@ -520,6 +520,58 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal("Web recipe", created2.GetProperty("name").GetString()); // the first recipe, returned as-is
     }
 
+    /// <summary>Body-measurement tracking (#71): log/upsert per day, history is oldest-first, owner-isolated.</summary>
+    [Fact]
+    public async Task Body_measurements_log_upsert_history_and_isolation()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"weight-{Guid.NewGuid():N}");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        using (var r = await client.PostAsJsonAsync("/api/v1/measurements", new { date = yesterday, weightKg = 81.0, bodyFatPct = 18.0 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        using (var r = await client.PostAsJsonAsync("/api/v1/measurements", new { date = today, weightKg = 80.5 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        var history = await client.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json);
+        Assert.Equal(2, history.GetArrayLength());
+        Assert.Equal(81.0, history[0].GetProperty("weightKg").GetDouble());  // oldest first
+        Assert.Equal(80.5, history[1].GetProperty("weightKg").GetDouble());
+
+        // Re-log today ⇒ UPSERT (still two entries, the value updated).
+        using (var r = await client.PostAsJsonAsync("/api/v1/measurements", new { date = today, weightKg = 80.0 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        var afterReLog = await client.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json);
+        Assert.Equal(2, afterReLog.GetArrayLength());
+        Assert.Equal(80.0, afterReLog[1].GetProperty("weightKg").GetDouble());
+
+        // A non-positive weight is rejected.
+        using (var bad = await client.PostAsJsonAsync("/api/v1/measurements", new { weightKg = 0.0 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        }
+
+        // Delete a day.
+        using (var del = await client.DeleteAsync($"/api/v1/measurements/{today}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        Assert.Equal(1, (await client.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json)).GetArrayLength());
+
+        // Owner isolation: a different user sees none of it.
+        var other = await fixture.CreateReadyClientAsync(subject: $"weight-other-{Guid.NewGuid():N}");
+        Assert.Equal(0, (await other.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json)).GetArrayLength());
+    }
+
     /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>
     [Fact]
     public async Task Photo_parse_degrades_gracefully_without_a_vision_provider()
