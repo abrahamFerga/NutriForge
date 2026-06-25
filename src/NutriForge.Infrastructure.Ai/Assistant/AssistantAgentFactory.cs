@@ -15,6 +15,9 @@ public interface IAssistantAgentFactory
     /// <summary>True when a chat provider is configured; false ⇒ the endpoint returns 503.</summary>
     bool IsConfigured { get; }
 
+    /// <summary>Model name as configured (for telemetry tagging).</summary>
+    string Model { get; }
+
     /// <summary>Create the agent bound to this request's (owner-scoped) tools.</summary>
     AIAgent CreateAgent(IList<AITool> tools);
 
@@ -50,14 +53,18 @@ public sealed class AssistantAgentFactory : IAssistantAgentFactory
         """;
 
     private readonly ChatClient? _chatClient;
+    private readonly AiOptions _options;
 
     public AssistantAgentFactory(AiOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        _options = options;
         _chatClient = Build(options);
     }
 
     public bool IsConfigured => _chatClient is not null;
+
+    public string Model => _options.Model;
 
     public AIAgent CreateAgent(IList<AITool> tools)
     {

@@ -20,4 +20,14 @@ public sealed class AiOptions
 
     /// <summary>Endpoint for Azure OpenAI or a local Ollama (e.g. <c>http://localhost:11434</c>).</summary>
     public string? Endpoint { get; set; }
+
+    /// <summary>Maximum tokens the model may emit per turn. 0 = provider default. Caps cost and latency.</summary>
+    public int MaxOutputTokens { get; set; }
+
+    /// <summary>
+    /// Soft monthly token budget per user, in thousands of tokens. 0 = unlimited.
+    /// When a user's input+output token estimate for the current calendar month exceeds this value,
+    /// further turns are rejected with a 429-equivalent until the month rolls over.
+    /// </summary>
+    public int MonthlyTokenBudgetK { get; set; }
 }

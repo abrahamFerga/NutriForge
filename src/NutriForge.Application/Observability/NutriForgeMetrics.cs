@@ -25,6 +25,9 @@ public sealed class NutriForgeMetrics : IDisposable
     private readonly Histogram<double> _planKcalDeviation;
     private readonly Histogram<double> _planDuration;
     private readonly Counter<long> _shoppingListsCreated;
+    private readonly Counter<long> _aiTokensUsed;
+    private readonly Histogram<double> _aiRequestDuration;
+    private readonly Counter<long> _aiTurns;
 
     public NutriForgeMetrics()
     {
@@ -46,6 +49,15 @@ public sealed class NutriForgeMetrics : IDisposable
         _shoppingListsCreated = _meter.CreateCounter<long>(
             "nutriforge.shopping_list.created", unit: "{list}",
             description: "Shopping lists created — the loop-completion signal (from_plan distinguishes plan→shop).");
+        _aiTokensUsed = _meter.CreateCounter<long>(
+            "nutriforge.ai.tokens_used", unit: "{token}",
+            description: "Estimated tokens consumed per assistant turn, tagged by type (input/output) and model.");
+        _aiRequestDuration = _meter.CreateHistogram<double>(
+            "nutriforge.ai.request_duration", unit: "s",
+            description: "End-to-end assistant turn latency (from service entry to response ready).");
+        _aiTurns = _meter.CreateCounter<long>(
+            "nutriforge.ai.turns", unit: "{turn}",
+            description: "Assistant turns completed or rejected (outcome=ok|budget_exceeded|injection|unconfigured).");
     }
 
     /// <summary>Day-1 activation + logging friction. <paramref name="elapsedSeconds"/> feeds the histogram when the client reports it.</summary>
@@ -73,6 +85,28 @@ public sealed class NutriForgeMetrics : IDisposable
     /// <summary>Loop completion — tag whether the list was built from an accepted plan.</summary>
     public void ShoppingListCreated(bool fromPlan) =>
         _shoppingListsCreated.Add(1, new KeyValuePair<string, object?>("from_plan", fromPlan));
+
+    /// <summary>
+    /// Record one assistant turn. Call after the turn completes (or is rejected).
+    /// Token counts are estimates (chars/4) — good enough for budget gates, not billing.
+    /// </summary>
+    public void AiTurnCompleted(
+        string outcome, string model, long inputTokens, long outputTokens, double durationSeconds)
+    {
+        var modelTag = new KeyValuePair<string, object?>("model", model);
+        _aiTurns.Add(1,
+            new KeyValuePair<string, object?>("outcome", outcome),
+            modelTag);
+
+        if (outcome == "ok" && inputTokens > 0)
+        {
+            _aiTokensUsed.Add(inputTokens,
+                new KeyValuePair<string, object?>("type", "input"), modelTag);
+            _aiTokensUsed.Add(outputTokens,
+                new KeyValuePair<string, object?>("type", "output"), modelTag);
+            _aiRequestDuration.Record(durationSeconds, modelTag);
+        }
+    }
 
     public void Dispose() => _meter.Dispose();
 }

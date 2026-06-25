@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using NutriForge.Application.Observability;
 using NutriForge.Infrastructure.Ai.Assistant;
 
 namespace NutriForge.Infrastructure.Ai;
