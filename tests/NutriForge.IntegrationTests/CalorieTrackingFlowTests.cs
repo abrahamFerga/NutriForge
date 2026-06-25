@@ -146,6 +146,27 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
     }
 
+    /// <summary>#14: the admin registry lists the installed connectors, each with a config-derived
+    /// "configured" flag and a (here never-run) last-run status.</summary>
+    [Fact]
+    public async Task Connector_registry_lists_installed_connectors_with_configured_and_last_run()
+    {
+        var admin = await fixture.CreateReadyClientAsync(subject: $"admin-{Guid.NewGuid():N}", role: "admin");
+        var status = await admin.GetFromJsonAsync<JsonElement>("/internal/import/status", Json);
+
+        var connectors = status.GetProperty("connectors").EnumerateArray().ToList();
+        Assert.NotEmpty(connectors);
+
+        // Open Food Facts needs no key → always configured.
+        var off = connectors.Single(c => c.GetProperty("key").GetString() == "open-food-facts");
+        Assert.True(off.GetProperty("configured").GetBoolean());
+
+        // USDA needs a data directory, which the test host doesn't set → not configured, and never run.
+        var usda = connectors.Single(c => c.GetProperty("key").GetString() == "usda-fdc");
+        Assert.False(usda.GetProperty("configured").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, usda.GetProperty("lastRun").ValueKind);
+    }
+
     [Fact]
     public async Task Diet_plan_generates_to_ready_and_closes_the_loop_into_a_shopping_list()
     {

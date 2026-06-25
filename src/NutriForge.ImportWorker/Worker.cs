@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NutriForge.Application.Connectors;
 using NutriForge.Infrastructure.UsdaFdc;
 
 namespace NutriForge.ImportWorker;
@@ -49,13 +50,29 @@ public sealed partial class Worker(
         }
     }
 
+    /// <summary>The connector key recorded in the registry's last-run log (#14).</summary>
+    private const string UsdaConnectorKey = "usda-fdc";
+
     private async Task RunImportAsync(string directory, CancellationToken ct)
     {
         using var scope = scopeFactory.CreateScope();
-        var importer = scope.ServiceProvider.GetRequiredService<UsdaFdcImporter>();
-        var foods = await new UsdaFdcCsvSource(directory).LoadAsync(ct).ConfigureAwait(false);
-        var result = await importer.ImportAsync(foods, ct).ConfigureAwait(false);
-        LogImported(logger, result.Inserted, result.Updated, foods.Count);
+        var runs = scope.ServiceProvider.GetRequiredService<IConnectorRunStore>();
+        await runs.BeginAsync(UsdaConnectorKey, ct).ConfigureAwait(false);
+        try
+        {
+            var importer = scope.ServiceProvider.GetRequiredService<UsdaFdcImporter>();
+            var foods = await new UsdaFdcCsvSource(directory).LoadAsync(ct).ConfigureAwait(false);
+            var result = await importer.ImportAsync(foods, ct).ConfigureAwait(false);
+            LogImported(logger, result.Inserted, result.Updated, foods.Count);
+            await runs.CompleteAsync(
+                UsdaConnectorKey, result.Inserted + result.Updated,
+                $"{result.Inserted} inserted, {result.Updated} updated ({foods.Count} foods)", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await runs.FailAsync(UsdaConnectorKey, ex.Message, ct).ConfigureAwait(false);
+            throw;
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Import worker started.")]

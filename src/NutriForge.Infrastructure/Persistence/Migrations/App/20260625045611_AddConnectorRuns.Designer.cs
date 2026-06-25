@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NutriForge.Infrastructure.Persistence;
@@ -12,9 +13,11 @@ using NutriForge.Infrastructure.Persistence;
 namespace NutriForge.Infrastructure.Persistence.Migrations.App
 {
     [DbContext(typeof(NutriForgeDbContext))]
-    partial class NutriForgeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260625045611_AddConnectorRuns")]
+    partial class AddConnectorRuns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

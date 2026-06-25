@@ -3,6 +3,7 @@ using NutriForge.Application.Abstractions;
 using NutriForge.Domain.Assistant;
 using NutriForge.Domain.Catalog;
 using NutriForge.Domain.Common;
+using NutriForge.Domain.Connectors;
 using NutriForge.Domain.Diary;
 using NutriForge.Domain.Planning;
 using NutriForge.Domain.Recipes;
@@ -55,6 +56,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<ConnectorRun> ConnectorRuns => Set<ConnectorRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -337,6 +339,16 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(r => r.Id);
             e.Property(r => r.Key).HasMaxLength(200).IsRequired();
             e.HasIndex(r => new { r.Key, r.UserId }).IsUnique();
+        });
+
+        // Connector registry last-run log (#14): one upserted row per connector, keyed by its stable id.
+        b.Entity<ConnectorRun>(e =>
+        {
+            e.ToTable("connector_runs", "ops");
+            e.HasKey(r => r.ConnectorKey);
+            e.Property(r => r.ConnectorKey).HasMaxLength(50);
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(r => r.Detail).HasMaxLength(1000);
         });
     }
 }
