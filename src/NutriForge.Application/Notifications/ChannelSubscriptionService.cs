@@ -21,7 +21,7 @@ public sealed record RedeemResultDto(bool Linked, string Channel);
 /// </summary>
 public sealed class ChannelSubscriptionService(IAppDbContext db, IClock clock)
 {
-    private static readonly string[] AllowedChannels = ["mock", "telegram"];
+    private static readonly string[] AllowedChannels = ["mock", "telegram", "twilio-whatsapp"];
     private static readonly TimeSpan CodeTtl = TimeSpan.FromMinutes(15);
 
     public async Task<ChannelSubscriptionDto> GetAsync(Guid userId, string channel, CancellationToken ct = default)

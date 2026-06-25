@@ -10,6 +10,7 @@
     <PackageReference Include="Aspire.StackExchange.Redis" />
     <PackageReference Include="Google.OrTools" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
   <ItemGroup>
