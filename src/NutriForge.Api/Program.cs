@@ -15,6 +15,9 @@ var builder = WebApplication.CreateBuilder(args);
 // QuestPDF Community licence (free for OSS / small orgs) — required before any PDF is generated.
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
+// Don't advertise the server stack in responses (#57).
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
 // OpenTelemetry + health checks + service discovery + HTTP resilience.
 builder.AddServiceDefaults();
 
@@ -58,6 +61,17 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 app.UseExceptionHandler();
+
+// Defense-in-depth (#57): HSTS (HTTPS, deployed only) + strict security headers on every response.
+// The API is stateless/token-based and sets NO cookies, so there's no cookie surface to secure here
+// (auth is a Bearer token / dev header); the SPA owns its own cookie/session posture.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+app.UseSecurityHeaders();
+
 app.MapDefaultEndpoints(); // /health + /alive (anonymous)
 
 if (app.Environment.IsDevelopment())

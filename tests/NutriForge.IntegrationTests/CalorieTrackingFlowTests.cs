@@ -24,6 +24,24 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
     }
 
+    /// <summary>Every response carries the defense-in-depth security headers (#57).</summary>
+    [Fact]
+    public async Task Responses_carry_security_headers()
+    {
+        var client = fixture.App.CreateHttpClient("api");
+        using var res = await client.GetAsync("/"); // anonymous root
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("nosniff", HeaderValue(res, "X-Content-Type-Options"));
+        Assert.Equal("DENY", HeaderValue(res, "X-Frame-Options"));
+        Assert.Equal("no-referrer", HeaderValue(res, "Referrer-Policy"));
+        Assert.Contains("default-src 'none'", HeaderValue(res, "Content-Security-Policy"));
+        Assert.False(res.Headers.Contains("X-Powered-By"));
+
+        static string HeaderValue(HttpResponseMessage res, string name) =>
+            res.Headers.TryGetValues(name, out var values) ? values.Single() : "";
+    }
+
     [Fact]
     public async Task Full_calorie_tracking_flow_works_end_to_end()
     {
