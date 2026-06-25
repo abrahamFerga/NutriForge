@@ -11,6 +11,8 @@ import {
   Utensils,
 } from "lucide-react";
 import { AssistantPanel } from "@/components/AssistantPanel";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Spinner } from "@/components/ui/spinner";
 import { useProfile } from "@/hooks/useQueries";
 import { authEnabled, logout } from "@/lib/auth";
@@ -45,10 +47,21 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-200">
+      {/* Skip to main content — WCAG 2.4.1 */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-brand-500 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-slate-950"
+      >
+        Skip to main content
+      </a>
+
       {/* Sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900/40 px-3 py-5 md:flex">
+      <aside
+        aria-label="Primary navigation"
+        className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-slate-800 bg-slate-900/40 px-3 py-5 md:flex"
+      >
         <Brand />
-        <nav className="mt-8 flex flex-col gap-1">
+        <nav aria-label="Main menu" className="mt-8 flex flex-col gap-1">
           {NAV.map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
@@ -62,8 +75,9 @@ export function AppShell() {
                     : "text-slate-400 hover:bg-slate-800 hover:text-slate-100",
                 )
               }
+              aria-current={undefined}
             >
-              <Icon className="h-5 w-5" />
+              <Icon className="h-5 w-5" aria-hidden="true" />
               {label}
             </NavLink>
           ))}
@@ -77,7 +91,10 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
         {/* Extra bottom padding on mobile leaves room for the fixed bottom tab bar + FAB. */}
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-6 md:pb-8 lg:px-8">
+        <main
+          id="main-content"
+          className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-6 md:pb-8 lg:px-8"
+        >
           <Outlet />
         </main>
       </div>
@@ -140,7 +157,9 @@ function TopBar() {
         <span className="font-bold text-slate-100">NutriForge</span>
       </div>
       <div className="hidden md:block" />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        <LanguageSwitcher />
+        <ThemeToggle />
         <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-3 py-1.5">
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-500/20 text-xs font-bold text-brand-300">
             D

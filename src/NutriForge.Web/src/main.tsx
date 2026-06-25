@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MsalProvider, useIsAuthenticated } from "@azure/msal-react";
 import App from "./App.tsx";
 import { authEnabled, initAuth, login, msalInstance } from "./lib/auth";
+import { ThemeProvider } from "./components/ThemeProvider";
+import "./i18n";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -39,19 +41,21 @@ function AuthGate({ children }: { children: ReactNode }) {
 
 const tree = (
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        {authEnabled && msalInstance ? (
-          <MsalProvider instance={msalInstance}>
-            <AuthGate>
-              <App />
-            </AuthGate>
-          </MsalProvider>
-        ) : (
-          <App />
-        )}
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          {authEnabled && msalInstance ? (
+            <MsalProvider instance={msalInstance}>
+              <AuthGate>
+                <App />
+              </AuthGate>
+            </MsalProvider>
+          ) : (
+            <App />
+          )}
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ThemeProvider>
   </StrictMode>
 );
 
