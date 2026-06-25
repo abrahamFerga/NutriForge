@@ -23,6 +23,13 @@ public static class NotificationEndpoints
             return Results.Ok(result);
         }).WithName("SendDailySummary");
 
+        // Send the 7-day weekly progress digest now (on-demand). Useful for testing the format.
+        group.MapPost("/weekly-summary", async (ICurrentUser user, WeeklySummaryService weeklySummaries, IClock clock, CancellationToken ct) =>
+        {
+            var result = await weeklySummaries.SendForAsync(user.CurrentUserId(), clock.Today, ct);
+            return Results.Ok(result);
+        }).WithName("SendWeeklySummary");
+
         // What the channel "sent" — the outbox for the current user, newest first.
         group.MapGet("/outbox", async (ICurrentUser user, IAppDbContext db, CancellationToken ct) =>
         {

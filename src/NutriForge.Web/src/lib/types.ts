@@ -547,12 +547,16 @@ export interface ChannelSubscription {
   sendHourUtc: number;
   isLinked: boolean;
   address: string | null;
+  weeklySummaryEnabled: boolean;
+  reminderHourUtc: number | null;
 }
 
 export interface UpdateChannelSubscriptionRequest {
   channel: string;
   enabled: boolean;
   sendHourUtc: number;
+  weeklySummaryEnabled?: boolean;
+  reminderHourUtc?: number | null;
 }
 
 export interface LinkCode {

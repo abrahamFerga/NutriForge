@@ -31,8 +31,12 @@ export function NotificationsPanel() {
   });
 
   const update = useMutation({
-    mutationFn: (patch: { enabled: boolean; sendHourUtc: number }) =>
-      notificationsApi.updateSubscription({ channel: "telegram", ...patch }),
+    mutationFn: (patch: {
+      enabled: boolean;
+      sendHourUtc: number;
+      weeklySummaryEnabled?: boolean;
+      reminderHourUtc?: number | null;
+    }) => notificationsApi.updateSubscription({ channel: "telegram", ...patch }),
     onSuccess: (s) => qc.setQueryData(SUB_KEY, s),
   });
 
@@ -168,6 +172,79 @@ export function NotificationsPanel() {
               {sendNow.isPending ? <Spinner /> : <Send className="h-4 w-4" />}
               Send my summary now
             </Button>
+
+            {/* Weekly digest */}
+            <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-3 space-y-2">
+              <p className="text-xs font-medium tracking-wide text-slate-400 uppercase">
+                Weekly digest
+              </p>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  className="accent-brand-500"
+                  checked={s.weeklySummaryEnabled ?? false}
+                  disabled={update.isPending}
+                  onChange={(e) =>
+                    update.mutate({
+                      enabled: s.enabled,
+                      sendHourUtc: s.sendHourUtc,
+                      weeklySummaryEnabled: e.target.checked,
+                      reminderHourUtc: s.reminderHourUtc,
+                    })
+                  }
+                />
+                Send a 7-day progress summary every Sunday
+              </label>
+            </div>
+
+            {/* Log reminder */}
+            <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-3 space-y-2">
+              <p className="text-xs font-medium tracking-wide text-slate-400 uppercase">
+                Log reminder
+              </p>
+              <p className="text-xs text-slate-400">
+                Nudge me to log my meals if I haven't tracked anything by this UTC hour.
+              </p>
+              <div className="flex items-center gap-3">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    className="accent-brand-500"
+                    checked={s.reminderHourUtc != null}
+                    disabled={update.isPending}
+                    onChange={(e) =>
+                      update.mutate({
+                        enabled: s.enabled,
+                        sendHourUtc: s.sendHourUtc,
+                        weeklySummaryEnabled: s.weeklySummaryEnabled,
+                        reminderHourUtc: e.target.checked ? 12 : null,
+                      })
+                    }
+                  />
+                  Enabled
+                </label>
+                {s.reminderHourUtc != null && (
+                  <Select
+                    value={String(s.reminderHourUtc)}
+                    onChange={(e) =>
+                      update.mutate({
+                        enabled: s.enabled,
+                        sendHourUtc: s.sendHourUtc,
+                        weeklySummaryEnabled: s.weeklySummaryEnabled,
+                        reminderHourUtc: Number(e.target.value),
+                      })
+                    }
+                    className="w-24"
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>
+                        {String(h).padStart(2, "0")}:00
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+            </div>
 
             {outbox.data && outbox.data.length > 0 ? (
               <div>

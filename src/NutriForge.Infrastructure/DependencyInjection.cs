@@ -113,8 +113,10 @@ public static class DependencyInjection
         builder.Services.AddHostedService<OutboxDispatcher>();
         // Async diet-plan generation.
         builder.Services.AddHostedService<DietGen.DietPlanGenerationWorker>();
-        // Scheduled daily calorie summaries to subscribed channels.
+        // Scheduled notification workers: daily summaries, weekly digests, log reminders.
         builder.Services.AddHostedService<Notifications.DailySummaryWorker>();
+        builder.Services.AddHostedService<Notifications.WeeklySummaryWorker>();
+        builder.Services.AddHostedService<Notifications.LogReminderWorker>();
 
         return builder;
     }

@@ -29,6 +29,21 @@ public sealed class ChannelSubscription : IUserOwned, IAuditable, ITimestamped
     /// <summary>The last date a daily summary was sent, so the scheduled worker fires at most once a day.</summary>
     public DateOnly? LastSentOn { get; set; }
 
+    /// <summary>Opt-in to receive a 7-day progress digest each Sunday.</summary>
+    public bool WeeklySummaryEnabled { get; set; }
+
+    /// <summary>Dedup guard: the last Sunday the weekly digest was sent for this subscription.</summary>
+    public DateOnly? WeeklyLastSentOn { get; set; }
+
+    /// <summary>
+    /// UTC hour (0–23) to send a "time to log" nudge if the user hasn't logged anything today.
+    /// Null means the log reminder is disabled.
+    /// </summary>
+    public int? ReminderHourUtc { get; set; }
+
+    /// <summary>Dedup guard: the last date a log reminder was sent.</summary>
+    public DateOnly? ReminderLastSentOn { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
