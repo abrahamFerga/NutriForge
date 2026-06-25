@@ -122,7 +122,10 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(r => r.SourceUrl).HasMaxLength(2048);
             e.Property(r => r.SourceType).HasMaxLength(20);
             e.Property(r => r.SourceVideoId).HasMaxLength(20);
+            e.Property(r => r.SourceKey).HasMaxLength(400);
             e.Property(r => r.ThumbnailUrl).HasMaxLength(2048);
+            // Web-import dedup: one recipe per owner per normalized source page (YouTube uses the video index).
+            e.HasIndex(r => new { r.OwnerUserId, r.SourceKey }).IsUnique().HasFilter("\"SourceKey\" IS NOT NULL");
             e.HasMany(r => r.Ingredients).WithOne().HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(r => r.Ingredients).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasIndex(r => r.IsNutritionComputed);

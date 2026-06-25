@@ -45,6 +45,38 @@ public sealed class Recipe : IAuditable, ITimestamped
     public string? SourceVideoId { get; set; }     // canonical 11-char YouTube id — for embed + dedup
     public string? ThumbnailUrl { get; set; }
 
+    /// <summary>
+    /// Normalized dedup key for a WEB-imported recipe (null for YouTube — its <see cref="SourceVideoId"/>
+    /// dedups — and for hand-authored recipes). Server-derived from <see cref="SourceUrl"/>, never bound
+    /// from a request, so re-importing the same page (ignoring scheme / trailing slash / fragment / case)
+    /// returns the existing recipe instead of a duplicate.
+    /// </summary>
+    public string? SourceKey { get; set; }
+
+    /// <summary>
+    /// Compute the web dedup key: null when there's a video id (the video index owns YouTube dedup) or no
+    /// URL; otherwise the URL's host + path + query, lower-cased with the scheme/fragment/trailing-slash
+    /// dropped. Pure.
+    /// </summary>
+    public static string? NormalizeSourceKey(string? videoId, string? sourceUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(videoId) || string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            return null;
+        }
+
+        var url = sourceUrl.Trim();
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return Trim(url.ToLowerInvariant());
+        }
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        return Trim($"{uri.Host}{path}{uri.Query}".ToLowerInvariant());
+
+        static string Trim(string s) => s.Length > 400 ? s[..400] : s;
+    }
+
     private readonly List<RecipeIngredient> _ingredients = [];
     public IReadOnlyCollection<RecipeIngredient> Ingredients => _ingredients;
 

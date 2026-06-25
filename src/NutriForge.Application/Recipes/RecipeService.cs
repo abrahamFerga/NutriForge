@@ -41,6 +41,20 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
             }
         }
 
+        // Web import (#91): same normalized source page (no video id) ⇒ return the existing visible recipe.
+        var sourceKey = Recipe.NormalizeSourceKey(request.SourceVideoId, request.SourceUrl);
+        if (sourceKey is not null)
+        {
+            var existing = await db.Recipes.AsNoTracking().Include(r => r.Ingredients)
+                .Where(r => r.SourceKey == sourceKey)
+                .OrderBy(r => r.OwnerUserId == null ? 0 : 1)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                return existing.ToDto(currentUser.UserId);
+            }
+        }
+
         var recipe = await BuildRecipeAsync(new Recipe(), request, ct).ConfigureAwait(false);
         if (ownerUserId is { } owner)
         {
@@ -175,6 +189,7 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
         recipe.SourceType = request.SourceType;
         recipe.SourceVideoId = request.SourceVideoId;
         recipe.ThumbnailUrl = request.ThumbnailUrl;
+        recipe.SourceKey = Recipe.NormalizeSourceKey(request.SourceVideoId, request.SourceUrl);
 
         recipe.ClearIngredients();
         foreach (var line in request.Ingredients ?? [])

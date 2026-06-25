@@ -479,6 +479,47 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(id1, created2.GetProperty("id").GetString());
     }
 
+    /// <summary>Re-importing the same web recipe URL (#91) returns the existing recipe, not a duplicate.</summary>
+    [Fact]
+    public async Task Re_importing_the_same_web_recipe_url_dedups_by_normalized_source_key()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"webdedup-{Guid.NewGuid():N}");
+        var url = $"https://recipes.example.com/{Guid.NewGuid():N}";
+
+        object body = new
+        {
+            name = "Web recipe",
+            servings = 2,
+            totalMinutes = 10,
+            instructions = "mix",
+            tags = new[] { "test" },
+            ingredients = new[] { new { quantity = 100.0, unit = "g", name = "egg" } },
+            sourceUrl = url,
+            sourceType = "web",
+        };
+        using var first = await client.PostAsJsonAsync("/api/v1/recipes", body, Json);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var id1 = (await first.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetString();
+
+        // Same page, different case + trailing slash ⇒ the SAME recipe (normalized dedup), not a second row.
+        object body2 = new
+        {
+            name = "A different title",
+            servings = 4,
+            totalMinutes = 5,
+            instructions = "x",
+            tags = new[] { "t" },
+            ingredients = new[] { new { quantity = 50.0, unit = "g", name = "egg" } },
+            sourceUrl = url.ToUpperInvariant() + "/",
+            sourceType = "web",
+        };
+        using var second = await client.PostAsJsonAsync("/api/v1/recipes", body2, Json);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var created2 = await second.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal(id1, created2.GetProperty("id").GetString());
+        Assert.Equal("Web recipe", created2.GetProperty("name").GetString()); // the first recipe, returned as-is
+    }
+
     /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>
     [Fact]
     public async Task Photo_parse_degrades_gracefully_without_a_vision_provider()
