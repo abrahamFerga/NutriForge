@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NutriForge.Application.Abstractions;
+using NutriForge.Application.Recipes;
 
 namespace NutriForge.Infrastructure.RecipeImport;
 
@@ -9,7 +11,8 @@ namespace NutriForge.Infrastructure.RecipeImport;
 public static class DependencyInjection
 {
     /// <summary>Registers the YouTube metadata client; <paramref name="youTubeApiKey"/> (optional) enables description fetch.</summary>
-    public static IServiceCollection AddRecipeImport(this IServiceCollection services, string? youTubeApiKey = null)
+    public static IServiceCollection AddRecipeImport(
+        this IServiceCollection services, string? youTubeApiKey = null, IConfiguration? config = null)
     {
         services.AddSingleton(new YouTubeOptions { ApiKey = youTubeApiKey });
 
@@ -34,6 +37,39 @@ public static class DependencyInjection
             ConnectCallback = RecipeUrlFetcher.ConnectGuardedAsync,
         });
 
+        // Opt-in transcript enrichment (#93, ADR-0015). Default OFF; enabled via
+        // TranscriptEnrichment:Provider = "youtube-explode" | "vendor".
+        AddTranscriptSource(services, config);
+
+        // TranscriptEnrichmentJob is scoped (takes ICatalogDbContext).
+        services.AddScoped<TranscriptEnrichmentJob>();
+
         return services;
+    }
+
+    private static void AddTranscriptSource(IServiceCollection services, IConfiguration? config)
+    {
+        var opts = config?.GetSection(TranscriptEnrichmentOptions.SectionName)
+                       .Get<TranscriptEnrichmentOptions>()
+                   ?? new TranscriptEnrichmentOptions();
+        services.AddSingleton(opts);
+
+        if (opts.Provider.Equals("youtube-explode", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<ITranscriptSource, YoutubeExplodeTranscriptSource>();
+        }
+        else if (opts.Provider.Equals("vendor", StringComparison.OrdinalIgnoreCase)
+                 && !string.IsNullOrWhiteSpace(opts.VendorUrl))
+        {
+            services.AddHttpClient<ManagedVendorTranscriptSource>(client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
+            services.AddSingleton<ITranscriptSource, ManagedVendorTranscriptSource>();
+        }
+        else
+        {
+            services.AddSingleton<ITranscriptSource, NullTranscriptSource>();
+        }
     }
 }

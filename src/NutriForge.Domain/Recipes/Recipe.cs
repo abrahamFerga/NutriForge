@@ -45,6 +45,12 @@ public sealed class Recipe : IAuditable, ITimestamped
     public string? SourceVideoId { get; set; }     // canonical 11-char YouTube id — for embed + dedup
     public string? ThumbnailUrl { get; set; }
 
+    // Opt-in transcript enrichment (#93): fetched by the ImportWorker, never inline in the API path.
+    // Null = not yet fetched (or disabled). TranscriptFetchedAt is set even when the fetch returned
+    // nothing, so the worker does not retry failed/private videos on every run.
+    public string? TranscriptText { get; set; }
+    public DateTimeOffset? TranscriptFetchedAt { get; set; }
+
     /// <summary>
     /// Normalized dedup key for a WEB-imported recipe (null for YouTube — its <see cref="SourceVideoId"/>
     /// dedups — and for hand-authored recipes). Server-derived from <see cref="SourceUrl"/>, never bound

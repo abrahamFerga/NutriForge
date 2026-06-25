@@ -524,3 +524,68 @@ SSRF vector.
 **Alternatives rejected.** AI-only import (needless key/cost/latency for sites with JSON-LD); a host
 allowlist alone (brittle + still rebindable — the IP-level connect gate is the real control);
 the generic resilience HttpClient (its retries/redirects would bypass the per-connection SSRF gate).
+
+---
+
+## ADR-0015: Transcript enrichment is opt-in, isolated to the ImportWorker, and disabled by default
+
+- **Status**: accepted
+- **Date**: 2026-06-25
+- **Deciders**: Architecture
+- **Affects**: `NutriForge.Infrastructure.RecipeImport`, `NutriForge.ImportWorker`, `SPEC.md` §Recipes
+
+### Context
+
+YouTube recipe videos are enriched by fetching their closed-caption (VTT) transcripts, which can
+yield ingredient mentions and cooking steps that the video description alone does not contain. Two
+implementation approaches exist:
+
+1. **Self-hosted (`YoutubeExplode`)** — an open-source library that scrapes the YouTube InnerTube
+   API to fetch caption tracks without an API key. Reliable from residential IPs up to 2024.
+2. **Managed vendor** — an external transcript API (e.g. a proxy service or a paid provider)
+   reachable via HTTP from datacenter IPs.
+
+YouTube introduced **Proof-of-Origin Token (POT)** authentication for caption requests in 2025.
+Datacenter IPs (including Azure Container Apps egress) cannot obtain a valid POT, which means
+YoutubeExplode silently returns empty results in production while still working from residential IPs.
+
+Independently, fetching transcripts of **third-party videos** is a gray area under YouTube's Terms
+of Service (§4.B prohibits circumventing access controls). NutriForge does not claim ownership of
+third-party videos and processes only publicly available caption tracks for the user's personal recipe
+enrichment (similar to a screen-reader or accessibility tool). Nonetheless, a per-deployment disable
+switch is required so operators who consider this too risky can turn it off.
+
+### Decision
+
+Transcript enrichment is:
+
+1. **Default OFF.** `TranscriptEnrichment:Provider` defaults to `"none"`. No transcript is ever
+   fetched unless an operator explicitly sets the config.
+2. **ImportWorker-only.** Never fetched on the API request path. The Background Service runs after
+   the nightly USDA import and processes up to 20 recipes per run.
+3. **Best-effort, never blocking.** Any fetch failure (network, POT, private video) sets
+   `TranscriptFetchedAt` to now and `TranscriptText` to null, preventing infinite retries. The
+   worker never fails due to enrichment errors.
+4. **Two implementations, selected by config:**
+   - `"youtube-explode"` — self-hosted via YoutubeExplode; fragile on datacenter IPs post-2025 POT.
+   - `"vendor"` + `TranscriptEnrichment:VendorUrl` — external HTTP API; chosen for production use.
+5. **Connector registry (#14)** tracks each enrichment run under `transcript-enrichment`.
+
+### Consequences
+
+- **Positive:** recipe descriptions can be augmented with ingredient-rich transcript text, improving
+  NL import and diet plan ingredient resolution for video-first recipes.
+- **Negative:** YoutubeExplode self-hosted variant is effectively non-functional on datacenter IPs
+  unless a residential proxy or working POT workaround is found. Operators who enable it must accept
+  this limitation.
+- **Neutral:** the `TranscriptFetchedAt`/`TranscriptText` columns add ~80 bytes per YouTube recipe
+  row; minimal storage impact.
+
+### Alternatives rejected
+
+- **Inline API enrichment** — rejected: adds latency to the import preview endpoint and risks
+  blocking the response if the transcript service is down.
+- **Always-on YoutubeExplode** — rejected: would silently produce empty transcripts for almost all
+  production deployments (POT); waste of DB writes.
+- **Storing raw VTT format** — rejected: VTT timestamps add noise to NL parsing; cleaned plain text
+  is stored instead.

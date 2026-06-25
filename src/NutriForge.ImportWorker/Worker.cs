@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using NutriForge.Application.Connectors;
+using NutriForge.Application.Recipes;
 using NutriForge.Infrastructure.UsdaFdc;
 
 namespace NutriForge.ImportWorker;
@@ -40,6 +41,23 @@ public sealed partial class Worker(
             LogNoData(logger);
         }
 
+        // Opt-in transcript enrichment (#93, ADR-0015). Default OFF; enabled via
+        // TranscriptEnrichment:Provider config. A failed enrichment run never crashes the worker.
+        try
+        {
+            await RunTranscriptEnrichmentAsync(stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+#pragma warning disable CA1031
+        catch (Exception ex)
+        {
+            LogTranscriptEnrichmentFailed(logger, ex);
+        }
+#pragma warning restore CA1031
+
         try
         {
             await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
@@ -75,6 +93,32 @@ public sealed partial class Worker(
         }
     }
 
+    private const string TranscriptConnectorKey = "transcript-enrichment";
+
+    private async Task RunTranscriptEnrichmentAsync(CancellationToken ct)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var job = scope.ServiceProvider.GetRequiredService<TranscriptEnrichmentJob>();
+        if (!job.IsEnabled)
+        {
+            return;
+        }
+
+        var runs = scope.ServiceProvider.GetRequiredService<IConnectorRunStore>();
+        await runs.BeginAsync(TranscriptConnectorKey, ct).ConfigureAwait(false);
+        try
+        {
+            var enriched = await job.RunAsync(ct).ConfigureAwait(false);
+            LogTranscriptEnriched(logger, enriched);
+            await runs.CompleteAsync(TranscriptConnectorKey, enriched, $"{enriched} recipes enriched", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await runs.FailAsync(TranscriptConnectorKey, ex.Message, ct).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Import worker started.")]
     private static partial void LogStarted(ILogger logger);
 
@@ -86,4 +130,10 @@ public sealed partial class Worker(
 
     [LoggerMessage(Level = LogLevel.Error, Message = "USDA import from {Directory} failed.")]
     private static partial void LogImportFailed(ILogger logger, string directory, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Transcript enrichment complete: {Count} recipes enriched.")]
+    private static partial void LogTranscriptEnriched(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Transcript enrichment run failed; skipping this cycle.")]
+    private static partial void LogTranscriptEnrichmentFailed(ILogger logger, Exception ex);
 }

@@ -39,7 +39,7 @@ builder.Services.AddOpenFoodFacts();
 
 // Recipe-import connectors (YouTube metadata). The Data API key is optional — without it, import
 // falls back to oEmbed title/thumbnail + pasted recipe text (no auto-fetched description).
-builder.Services.AddRecipeImport(builder.Configuration["YouTube:ApiKey"]);
+builder.Services.AddRecipeImport(builder.Configuration["YouTube:ApiKey"], builder.Configuration);
 
 // The request-scoped authenticated principal (overrides the worker's system principal).
 builder.Services.AddHttpContextAccessor();
