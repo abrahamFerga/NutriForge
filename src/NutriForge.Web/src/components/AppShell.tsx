@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Navigate, Outlet } from "react-router-dom";
 import {
   BookOpen,
   CalendarRange,
@@ -11,7 +11,10 @@ import {
   Utensils,
 } from "lucide-react";
 import { AssistantPanel } from "@/components/AssistantPanel";
+import { Spinner } from "@/components/ui/spinner";
+import { useProfile } from "@/hooks/useQueries";
 import { authEnabled, logout } from "@/lib/auth";
+import { isOnboardingDismissed } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -24,6 +27,21 @@ const NAV = [
 
 export function AppShell() {
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const profile = useProfile();
+
+  // First-run gate (#68): a brand-new user (no profile, hasn't skipped) is sent to the welcome wizard.
+  // We wait for the profile query so we don't flash the empty app first. An error falls through to the
+  // shell rather than trapping the user.
+  if (profile.isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-950">
+        <Spinner />
+      </div>
+    );
+  }
+  if (profile.data === null && !isOnboardingDismissed()) {
+    return <Navigate to="/welcome" replace />;
+  }
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-200">
