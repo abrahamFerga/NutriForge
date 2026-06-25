@@ -1,6 +1,12 @@
 import type {
   AdherencePoint,
+  BatchCookPlanDto,
+  ChannelMessageDto,
+  ChannelSubscription,
   CreateDiaryEntryRequest,
+  DailySummaryResult,
+  LinkCode,
+  UpdateChannelSubscriptionRequest,
   CreateDietPlanRequest,
   CreateFoodRequest,
   CreatePantryItemRequest,
@@ -12,9 +18,12 @@ import type {
   DietPlanDto,
   FoodDetail,
   FoodSummary,
+  ImportPreviewDto,
+  ImportRecipeRequest,
   LogProposal,
   MealSlot,
   PantryItem,
+  PhotoAnalysisResult,
   ProfileDto,
   RecipeDto,
   RecipeScaleDto,
@@ -24,6 +33,7 @@ import type {
   TrendPoint,
   UpdateProfileRequest,
 } from "./types";
+import { getAuthHeaders } from "./auth";
 
 /**
  * Base URL for the backend API.
@@ -34,6 +44,10 @@ import type {
 const RAW_BASE = import.meta.env.VITE_API_BASE;
 export const API_BASE: string =
   RAW_BASE === undefined ? "http://localhost:5000" : RAW_BASE;
+
+// Auth (dev-auth headers or an OIDC Bearer token) is owned by ./auth. Re-exported here so existing
+// callers keep importing the role helpers from "@/lib/api".
+export { getDevRole, setDevRole, isAdmin } from "./auth";
 
 // RFC9457 problem+json shape (partial).
 interface ProblemDetails {
@@ -69,11 +83,10 @@ function buildUrl(path: string): string {
   return `${API_BASE.replace(/\/$/, "")}${path}`;
 }
 
-function buildHeaders(method: string, hasBody: boolean): Headers {
+async function buildHeaders(method: string, hasBody: boolean): Promise<Headers> {
   const headers = new Headers();
-  // Dev-auth scheme — sent on every request for local development.
-  headers.set("X-Debug-Subject", "demo-user");
-  headers.set("X-Debug-Role", "user");
+  // Auth: an OIDC Bearer token when a provider is configured, else the dev-auth debug headers.
+  await applyAuth(headers);
   headers.set("Accept", "application/json");
 
   if (hasBody) {
@@ -83,6 +96,13 @@ function buildHeaders(method: string, hasBody: boolean): Headers {
     headers.set("Idempotency-Key", crypto.randomUUID());
   }
   return headers;
+}
+
+/** Merge the current auth headers (Bearer or dev) onto a Headers object. */
+async function applyAuth(headers: Headers): Promise<void> {
+  for (const [key, value] of Object.entries(await getAuthHeaders())) {
+    headers.set(key, value);
+  }
 }
 
 function formatProblem(problem: ProblemDetails, fallback: string): string {
@@ -106,7 +126,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const response = await fetch(buildUrl(path), {
     method,
-    headers: buildHeaders(method, hasBody),
+    headers: await buildHeaders(method, hasBody),
     body: hasBody ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
   });
@@ -222,6 +242,51 @@ export const diaryApi = {
       body: { text, mealSlot, date },
     });
   },
+  /**
+   * Sends a meal photo (multipart) for vision recognition → confirmable candidates.
+   * Throws {@link ApiError} 503 when no vision provider is configured.
+   */
+  async parsePhoto(
+    file: File,
+    mealSlot: MealSlot,
+    date: string,
+  ): Promise<PhotoAnalysisResult> {
+    const headers = new Headers();
+    await applyAuth(headers);
+    headers.set("Accept", "application/json");
+    headers.set("Idempotency-Key", crypto.randomUUID());
+    // No Content-Type: the browser sets the multipart boundary for FormData.
+
+    const form = new FormData();
+    form.append("image", file);
+    form.append("mealSlot", mealSlot);
+    form.append("date", date);
+
+    const response = await fetch(buildUrl("/api/v1/diary/parse-photo"), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let problem: ProblemDetails = {};
+      if (text) {
+        try {
+          problem = JSON.parse(text) as ProblemDetails;
+        } catch {
+          /* non-JSON body */
+        }
+      }
+      throw new ApiError(
+        formatProblem(problem, `Request failed (${response.status} ${response.statusText})`),
+        response.status,
+        problem,
+      );
+    }
+
+    return response.json() as Promise<PhotoAnalysisResult>;
+  },
 };
 
 // ---- Recipes ----
@@ -237,10 +302,38 @@ export const recipesApi = {
   create(body: CreateRecipeRequest): Promise<RecipeDto> {
     return request<RecipeDto>("/api/v1/recipes", { method: "POST", body });
   },
+  update(id: string, body: CreateRecipeRequest): Promise<RecipeDto> {
+    return request<RecipeDto>(`/api/v1/recipes/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/recipes/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+  /** Admin-only: promote a recipe to the shared global catalog. Throws 403 (not admin) / 409 (clash). */
+  promoteGlobal(id: string): Promise<RecipeDto> {
+    return request<RecipeDto>(
+      `/api/v1/recipes/${encodeURIComponent(id)}/promote-global`,
+      { method: "POST", body: {} },
+    );
+  },
   scale(id: string, servings: number): Promise<RecipeScaleDto> {
     return request<RecipeScaleDto>(
       `/api/v1/recipes/${encodeURIComponent(id)}/scale?servings=${servings}`,
     );
+  },
+  /**
+   * Imports a recipe from a YouTube/recipe URL or pasted text → an editable draft.
+   * Throws {@link ApiError} 503 (no AI provider) or 422 (nothing extractable).
+   */
+  importPreview(body: ImportRecipeRequest): Promise<ImportPreviewDto> {
+    return request<ImportPreviewDto>("/api/v1/recipes/import/preview", {
+      method: "POST",
+      body,
+    });
   },
 };
 
@@ -306,11 +399,16 @@ export const dietPlansApi = {
       `/api/v1/diet-plans/${encodeURIComponent(id)}/adherence`,
     );
   },
+  /** The parallel batch-cook guide: one cook session per day-block, raw quantities by appliance. */
+  batchCook(id: string): Promise<BatchCookPlanDto> {
+    return request<BatchCookPlanDto>(
+      `/api/v1/diet-plans/${encodeURIComponent(id)}/batch-cook`,
+    );
+  },
   /** Fetches the printable meal-prep PDF as a Blob (dev-auth headers can't ride a plain link). */
   async pdf(id: string): Promise<Blob> {
     const headers = new Headers();
-    headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", "user");
+    await applyAuth(headers);
     headers.set("Accept", "application/pdf");
 
     const response = await fetch(
@@ -324,6 +422,45 @@ export const dietPlansApi = {
       );
     }
     return response.blob();
+  },
+};
+
+// ---- Notifications (#95) ----
+
+export const notificationsApi = {
+  getSubscription(channel = "telegram"): Promise<ChannelSubscription> {
+    return request<ChannelSubscription>(
+      `/api/v1/notifications/subscription?channel=${encodeURIComponent(channel)}`,
+    );
+  },
+  updateSubscription(
+    body: UpdateChannelSubscriptionRequest,
+  ): Promise<ChannelSubscription> {
+    return request<ChannelSubscription>("/api/v1/notifications/subscription", {
+      method: "PUT",
+      body,
+    });
+  },
+  createLink(channel = "telegram"): Promise<LinkCode> {
+    return request<LinkCode>("/api/v1/notifications/link", {
+      method: "POST",
+      body: { channel },
+    });
+  },
+  redeem(code: string, address: string): Promise<{ linked: boolean }> {
+    return request<{ linked: boolean }>("/api/v1/notifications/link/redeem", {
+      method: "POST",
+      body: { code, address },
+    });
+  },
+  sendNow(): Promise<DailySummaryResult> {
+    return request<DailySummaryResult>("/api/v1/notifications/daily-summary", {
+      method: "POST",
+      body: {},
+    });
+  },
+  outbox(): Promise<ChannelMessageDto[]> {
+    return request<ChannelMessageDto[]>("/api/v1/notifications/outbox");
   },
 };
 
@@ -360,8 +497,7 @@ export const assistantApi = {
     signal?: AbortSignal,
   ): Promise<void> {
     const headers = new Headers();
-    headers.set("X-Debug-Subject", "demo-user");
-    headers.set("X-Debug-Role", "user");
+    await applyAuth(headers);
     headers.set("Content-Type", "application/json");
     headers.set("Accept", "text/event-stream");
     headers.set("Idempotency-Key", crypto.randomUUID());

@@ -43,15 +43,18 @@ public static class DevDataSeeder
         db.Foods.AddRange(cola, proteinBar);
 
         // ---- Canonical ingredients (aisle + default food for nutrition) ----
-        var iChicken = Ing("chicken breast", "Meat & Seafood", chicken, gramsPerCount: 174, aliases: ["chicken"]);
-        var iRice = Ing("white rice", "Pantry", rice);
-        var iOats = Ing("rolled oats", "Pantry", oats, aliases: ["oats"]);
+        // YieldFactor (cooked = raw × factor) + whether the recipe states raw or cooked grams. The
+        // basis mirrors the linked food: "raw chicken"/"dry oats" ⇒ recipe grams are raw; "cooked rice"/
+        // "cooked beans" ⇒ recipe grams are cooked, so shopping divides the yield back out to buy raw.
+        var iChicken = Ing("chicken breast", "Meat & Seafood", chicken, gramsPerCount: 174, aliases: ["chicken"], yield: 0.75, gramsAreRaw: true);
+        var iRice = Ing("white rice", "Pantry", rice, yield: 2.8, gramsAreRaw: false);
+        var iOats = Ing("rolled oats", "Pantry", oats, aliases: ["oats"], yield: 2.2, gramsAreRaw: true);
         var iBanana = Ing("banana", "Produce", banana, gramsPerCount: 118);
         var iOil = Ing("olive oil", "Pantry", oliveOil, density: 0.91);
         var iAlmonds = Ing("almonds", "Pantry", almonds);
         var iYogurt = Ing("greek yogurt", "Dairy & Eggs", yogurt, aliases: ["yogurt"]);
         var iTofu = Ing("tofu", "Produce", tofu);
-        var iBeans = Ing("black beans", "Pantry", blackBeans, aliases: ["beans"]);
+        var iBeans = Ing("black beans", "Pantry", blackBeans, aliases: ["beans"], yield: 2.5, gramsAreRaw: false);
         var iSpinach = Ing("spinach", "Produce", spinach);
         var iPb = Ing("peanut butter", "Pantry", peanutButter);
         db.Ingredients.AddRange(iChicken, iRice, iOats, iBanana, iOil, iAlmonds, iYogurt, iTofu, iBeans, iSpinach, iPb);
@@ -63,14 +66,15 @@ public static class DevDataSeeder
             Diet("high-protein", "High protein", ["high-protein"], []));
 
         // ---- Recipes (computed nutrition from resolved ingredients) ----
+        // CookMethod groups parallel batch-cook steps by appliance (#86).
         db.Recipes.AddRange(
-            Recipe("Tofu & black bean rice bowl", 2, 20, ["vegan", "vegetarian", "high-protein", "dinner"],
+            Recipe("Tofu & black bean rice bowl", 2, 20, ["vegan", "vegetarian", "high-protein", "dinner"], "Stovetop",
                 RI(iTofu, tofu, 200), RI(iBeans, blackBeans, 150), RI(iRice, rice, 300), RI(iSpinach, spinach, 100), RI(iOil, oliveOil, 14)),
-            Recipe("Oatmeal with banana & peanut butter", 1, 5, ["vegan", "vegetarian", "breakfast"],
+            Recipe("Oatmeal with banana & peanut butter", 1, 5, ["vegan", "vegetarian", "breakfast"], "Stovetop",
                 RI(iOats, oats, 80), RI(iBanana, banana, 118), RI(iPb, peanutButter, 32)),
-            Recipe("Chicken & rice with spinach", 2, 25, ["high-protein", "dinner"],
+            Recipe("Chicken & rice with spinach", 2, 25, ["high-protein", "dinner"], "Oven",
                 RI(iChicken, chicken, 300), RI(iRice, rice, 300), RI(iSpinach, spinach, 100), RI(iOil, oliveOil, 14)),
-            Recipe("Greek yogurt with almonds & banana", 1, 5, ["vegetarian", "high-protein", "breakfast"],
+            Recipe("Greek yogurt with almonds & banana", 1, 5, ["vegetarian", "high-protein", "breakfast"], "No-cook",
                 RI(iYogurt, yogurt, 170), RI(iAlmonds, almonds, 28), RI(iBanana, banana, 118)));
 
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -96,7 +100,8 @@ public static class DevDataSeeder
     }
 
     private static Ingredient Ing(string name, string aisle, Domain.Catalog.Food food,
-        double? gramsPerCount = null, double? density = null, string[]? aliases = null)
+        double? gramsPerCount = null, double? density = null, string[]? aliases = null,
+        double yield = 1.0, bool gramsAreRaw = true)
         => new()
         {
             CanonicalName = name,
@@ -105,6 +110,8 @@ public static class DevDataSeeder
             GramsPerCount = gramsPerCount,
             DensityGPerMl = density,
             Aliases = [.. aliases ?? []],
+            YieldFactor = yield,
+            RecipeGramsAreRaw = gramsAreRaw,
         };
 
     private static DietType Diet(string slug, string name, List<string> tags, List<string> excluded)
@@ -124,9 +131,9 @@ public static class DevDataSeeder
         return ri;
     }
 
-    private static Recipe Recipe(string name, int servings, int minutes, List<string> tags, params RecipeIngredient[] ingredients)
+    private static Recipe Recipe(string name, int servings, int minutes, List<string> tags, string cookMethod, params RecipeIngredient[] ingredients)
     {
-        var recipe = new Recipe { Name = name, Servings = servings, TotalMinutes = minutes, Tags = tags };
+        var recipe = new Recipe { Name = name, Servings = servings, TotalMinutes = minutes, Tags = tags, CookMethod = cookMethod };
         foreach (var ri in ingredients)
         {
             recipe.AddIngredient(ri);

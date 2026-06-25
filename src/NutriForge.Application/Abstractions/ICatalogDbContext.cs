@@ -10,6 +10,7 @@ public interface ICatalogDbContext
     DbSet<Domain.Catalog.Food> Foods { get; }
     DbSet<Portion> Portions { get; }
     DbSet<Recipe> Recipes { get; }
+    DbSet<RecipeIngredient> RecipeIngredients { get; }
     DbSet<Ingredient> Ingredients { get; }
     DbSet<DietType> DietTypes { get; }
 

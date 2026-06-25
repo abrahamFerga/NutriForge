@@ -1,3 +1,4 @@
+using System.ClientModel;
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
@@ -25,6 +26,9 @@ public sealed partial class GlobalExceptionHandler(IProblemDetailsService proble
                 .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray())),
             FoodNotFoundException => (StatusCodes.Status404NotFound, "Food not found", null),
             AssistantNotConfiguredException => (StatusCodes.Status503ServiceUnavailable, "Assistant unavailable", null),
+            // The AI provider returned an error (bad key, rate limit, outage). Degrade like the
+            // unconfigured case rather than surfacing a raw 500 — every AI-backed endpoint benefits.
+            ClientResultException => (StatusCodes.Status503ServiceUnavailable, "AI service temporarily unavailable", null),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred", null),
         };
 

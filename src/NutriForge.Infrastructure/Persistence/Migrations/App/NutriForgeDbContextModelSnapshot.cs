@@ -181,6 +181,122 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
                     b.ToTable("diary_entries", "app");
                 });
 
+            modelBuilder.Entity("NutriForge.Domain.Notifications.AccountLinkToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("account_link_tokens", "app");
+                });
+
+            modelBuilder.Entity("NutriForge.Domain.Notifications.ChannelMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("ChannelName")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ChatId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("channel_messages", "app");
+                });
+
+            modelBuilder.Entity("NutriForge.Domain.Notifications.ChannelSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateOnly?>("LastSentOn")
+                        .HasColumnType("date");
+
+                    b.Property<int>("SendHourUtc")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Channel")
+                        .IsUnique();
+
+                    b.ToTable("channel_subscriptions", "app");
+                });
+
             modelBuilder.Entity("NutriForge.Domain.Planning.MealPlan", b =>
                 {
                     b.Property<Guid>("Id")
@@ -198,6 +314,11 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
 
                     b.Property<double>("AchievedProteinG")
                         .HasColumnType("double precision");
+
+                    b.Property<int>("BlockSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -272,6 +393,33 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
                     b.HasIndex("UserId");
 
                     b.ToTable("pantry_items", "app");
+                });
+
+            modelBuilder.Entity("NutriForge.Domain.Planning.PlanMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("MealPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("TargetKcal")
+                        .HasColumnType("double precision");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MealPlanId");
+
+                    b.ToTable("plan_members", "app");
                 });
 
             modelBuilder.Entity("NutriForge.Domain.Planning.PlanSlot", b =>
@@ -445,8 +593,18 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
                     b.Property<double?>("GramsPerCount")
                         .HasColumnType("double precision");
 
+                    b.Property<bool>("RecipeGramsAreRaw")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<double>("YieldFactor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("double precision")
+                        .HasDefaultValue(1.0);
 
                     b.HasKey("Id");
 
@@ -463,6 +621,10 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
 
                     b.Property<double>("CarbPerServing")
                         .HasColumnType("double precision");
+
+                    b.Property<string>("CookMethod")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -484,15 +646,34 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<double>("ProteinPerServing")
                         .HasColumnType("double precision");
 
                     b.Property<int>("Servings")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SourceType")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<string>("SourceVideoId")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.PrimitiveCollection<List<string>>("Tags")
                         .IsRequired()
                         .HasColumnType("text[]");
+
+                    b.Property<string>("ThumbnailUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<int>("TotalMinutes")
                         .HasColumnType("integer");
@@ -503,6 +684,12 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
                     b.HasKey("Id");
 
                     b.HasIndex("IsNutritionComputed");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("OwnerUserId", "SourceVideoId")
+                        .IsUnique()
+                        .HasFilter("\"SourceVideoId\" IS NOT NULL");
 
                     b.ToTable("recipes", "catalog");
                 });
@@ -866,6 +1053,15 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NutriForge.Domain.Planning.PlanMember", b =>
+                {
+                    b.HasOne("NutriForge.Domain.Planning.MealPlan", null)
+                        .WithMany("Members")
+                        .HasForeignKey("MealPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NutriForge.Domain.Planning.PlanSlot", b =>
                 {
                     b.HasOne("NutriForge.Domain.Planning.MealPlan", null)
@@ -900,6 +1096,8 @@ namespace NutriForge.Infrastructure.Persistence.Migrations.App
 
             modelBuilder.Entity("NutriForge.Domain.Planning.MealPlan", b =>
                 {
+                    b.Navigation("Members");
+
                     b.Navigation("Slots");
                 });
 

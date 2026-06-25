@@ -166,6 +166,27 @@ export interface CreateDiaryEntryRequest {
   quantity: number;
 }
 
+// ---- Photo food logging ----
+
+/** A food recognized in a meal photo: a trusted catalog match, or a flagged AI estimate. */
+export interface PhotoFoodCandidate {
+  label: string;
+  source: "catalog" | "estimate";
+  foodId: string | null;
+  portionId: string | null;
+  quantity: number;
+  grams: number;
+  kcal: number;
+  proteinG: number;
+  fatG: number;
+  carbG: number;
+  confidence: number;
+}
+
+export interface PhotoAnalysisResult {
+  items: PhotoFoodCandidate[];
+}
+
 export interface TrendPoint {
   date: string;
   kcal: number;
@@ -234,6 +255,10 @@ export interface RecipeSummary {
   proteinPerServing: number;
   fatPerServing: number;
   carbPerServing: number;
+  /** Shared, admin-curated recipe (readable by everyone). */
+  isGlobal: boolean;
+  /** Owned by the current user (so the UI can gate edit/delete). */
+  isMine: boolean;
 }
 
 export interface RecipeIngredient {
@@ -246,11 +271,19 @@ export interface RecipeIngredient {
   proteinG: number;
   fatG: number;
   carbG: number;
+  /** Raw (purchase/cook) weight — what you buy. Equals `grams` when the ingredient has no yield factor. */
+  rawGrams: number;
+  /** Cooked (plated) weight — what ends up on the plate. */
+  cookedGrams: number;
 }
 
 export interface RecipeDto extends RecipeSummary {
   instructions: string | null;
   ingredients: RecipeIngredient[];
+  sourceUrl?: string | null;
+  sourceType?: string | null;
+  sourceVideoId?: string | null;
+  thumbnailUrl?: string | null;
 }
 
 export interface CreateRecipeIngredient {
@@ -266,6 +299,26 @@ export interface CreateRecipeRequest {
   instructions?: string;
   tags?: string[];
   ingredients: CreateRecipeIngredient[];
+  // Provenance, carried through when saving an imported recipe.
+  sourceUrl?: string;
+  sourceType?: string;
+  sourceVideoId?: string;
+  thumbnailUrl?: string;
+  /** Intent to create a shared GLOBAL recipe. Honored only for admins; ignored otherwise. */
+  global?: boolean;
+}
+
+/** A request to import a recipe from a YouTube/recipe URL or pasted recipe text. */
+export interface ImportRecipeRequest {
+  url?: string;
+  text?: string;
+}
+
+/** An editable draft from an import — the user reviews/edits it, then saves via createRecipe. */
+export interface ImportPreviewDto {
+  draft: RecipeDto;
+  servingsAssumed: boolean;
+  warnings: string[];
 }
 
 export interface ScaledIngredient {
@@ -326,6 +379,7 @@ export interface CreateShoppingListRequest {
 export type DietPlanStatus = "Generating" | "Ready" | "Infeasible" | "Accepted";
 
 export interface DietPlanSlot {
+  /** With day-block rotation this is a BLOCK index (1..numBlocks), not a calendar day. */
   day: number;
   mealSlot: string;
   recipeId: string;
@@ -337,22 +391,44 @@ export interface DietPlanSlot {
   carbG: number;
 }
 
+/** A person on the plan, with their already-clamped portion factor (the UI never re-derives it). */
+export interface PlanMemberDto {
+  name: string;
+  targetKcal: number;
+  portionFactor: number;
+}
+
 export interface DietPlanDto {
   id: string;
   status: DietPlanStatus;
   targetKcal: number;
-  /** Per-eater daily averages — never multiply these by `eaters` in the UI. */
+  /** Per-primary daily averages — never multiply by the headcount; each member = × portionFactor. */
   achievedKcal: number;
   achievedProteinG: number;
   achievedFatG: number;
   achievedCarbG: number;
-  /** People the plan is cooked/shopped for. Scales cook totals + the shopping list only. */
+  /** Headcount (for labels). Quantities scale by `portionMultiplier`. */
   eaters: number;
+  /** Σ of member portion factors (or eaters when no members) — scales cook totals + shopping. */
+  portionMultiplier: number;
+  members: PlanMemberDto[];
+  /** Total days the plan covers. */
+  horizonDays: number;
+  /** Days each cooked meal-set covers (cook-once-eat-N-days). 1 = a fresh set every day. */
+  blockSize: number;
+  /** Distinct meal-sets cooked = ⌈horizonDays / blockSize⌉; each slot's `day` is a block index. */
+  numBlocks: number;
   message: string | null;
   slots: DietPlanSlot[];
 }
 
 export type DietSlug = "vegan" | "vegetarian" | "high-protein";
+
+/** One additional person (the owner is added automatically). Omit targetKcal for "same as me". */
+export interface PlanMemberInput {
+  name: string;
+  targetKcal?: number;
+}
 
 export interface CreateDietPlanRequest {
   desire?: string;
@@ -363,8 +439,12 @@ export interface CreateDietPlanRequest {
   maxPrepMinutes?: number;
   mealsPerDay?: number;
   horizonDays?: number;
-  /** Number of people to cook/shop for (default 1). */
+  /** Number of people to cook/shop for (default 1). Ignored when `members` is set. */
   eaters?: number;
+  /** The OTHER people eating this plan (the owner is added automatically). */
+  members?: PlanMemberInput[];
+  /** Cook-once-eat-N-days: days each cooked meal-set covers (default 1). Clamped to [1, horizonDays]. */
+  blockSize?: number;
 }
 
 export interface AdherencePoint {
@@ -372,4 +452,74 @@ export interface AdherencePoint {
   plannedKcal: number;
   loggedKcal: number;
   adherencePct: number;
+}
+
+// ---- Notifications (#95) ----
+
+export interface ChannelSubscription {
+  channel: string;
+  enabled: boolean;
+  sendHourUtc: number;
+  isLinked: boolean;
+  address: string | null;
+}
+
+export interface UpdateChannelSubscriptionRequest {
+  channel: string;
+  enabled: boolean;
+  sendHourUtc: number;
+}
+
+export interface LinkCode {
+  code: string;
+  expiresAt: string;
+}
+
+export interface ChannelMessageDto {
+  channel: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface DailySummaryResult {
+  sent: boolean;
+  channel: string;
+  message: string;
+}
+
+// ---- Batch-cook guide (#86) ----
+
+export interface BatchCookIngredient {
+  name: string;
+  /** Raw (purchase/cook) weight to cook for the whole block. */
+  rawGrams: number;
+}
+
+export interface BatchCookStep {
+  recipeName: string;
+  /** Appliance/method (Oven, Stovetop, No-cook, …) used to group parallel steps. */
+  method: string;
+  /** Servings to cook for everyone, for the whole block. */
+  cookServings: number;
+  /** Per-person/day portions to split the batch into. */
+  portionInto: number;
+  ingredients: BatchCookIngredient[];
+}
+
+export interface BatchCookBlock {
+  block: number;
+  /** Calendar-day range, e.g. "Days 1–3". */
+  days: string;
+  dayCount: number;
+  portions: number;
+  steps: BatchCookStep[];
+}
+
+export interface BatchCookPlanDto {
+  planId: string;
+  eaters: number;
+  portionMultiplier: number;
+  horizonDays: number;
+  blockSize: number;
+  blocks: BatchCookBlock[];
 }

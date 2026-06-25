@@ -30,14 +30,15 @@ public sealed class RecipesAndShoppingTests
     [Fact]
     public async Task Recipe_nutrition_is_computed_from_resolved_ingredients()
     {
-        await using var db = TestDb.New(Guid.NewGuid());
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
         SeedFoodAndIngredient(db, "rice", "Pantry", 130, 2.7, 0.3, 28.2);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var recipes = new RecipeService(db);
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
         var recipe = await recipes.CreateAsync(new CreateRecipeRequest(
             "Rice bowl", Servings: 2, TotalMinutes: 10, Instructions: null, Tags: ["dinner"],
-            Ingredients: [new RecipeIngredientInput(300, "g", "rice")]));
+            Ingredients: [new RecipeIngredientInput(300, "g", "rice")]), ownerUserId: userId);
 
         // 300 g rice @ 130 kcal/100g = 390 kcal total → 195 per serving (2 servings), computed by code.
         Assert.True(recipe.IsNutritionComputed);
@@ -53,11 +54,11 @@ public sealed class RecipesAndShoppingTests
         SeedFoodAndIngredient(db, "chicken", "Meat & Seafood", 120, 22.5, 2.6, 0);
         await db.SaveChangesAsync(CancellationToken.None);
 
-        var recipes = new RecipeService(db);
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
         var bowl = await recipes.CreateAsync(new CreateRecipeRequest("Rice bowl", 2, 10, null, ["dinner"],
-            [new RecipeIngredientInput(300, "g", "rice")]));
+            [new RecipeIngredientInput(300, "g", "rice")]), ownerUserId: userId);
         var chickenRice = await recipes.CreateAsync(new CreateRecipeRequest("Chicken & rice", 2, 20, null, ["dinner"],
-            [new RecipeIngredientInput(200, "g", "rice"), new RecipeIngredientInput(300, "g", "chicken")]));
+            [new RecipeIngredientInput(200, "g", "rice"), new RecipeIngredientInput(300, "g", "chicken")]), ownerUserId: userId);
 
         // Already have 100 g of rice on hand.
         db.PantryItems.Add(new PantryItem { UserId = userId, IngredientId = rice.Id, IngredientName = "rice", Grams = 100 });
@@ -75,6 +76,28 @@ public sealed class RecipesAndShoppingTests
         // chicken 300 g, grouped under its own aisle.
         var meatAisle = list.Aisles.Single(a => a.Aisle == "Meat & Seafood");
         Assert.Equal(300, meatAisle.Items.Single().Grams);
+    }
+
+    [Fact]
+    public async Task Shopping_list_buys_raw_purchase_weight_using_the_yield_factor()
+    {
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
+        var rice = SeedFoodAndIngredient(db, "rice", "Pantry", 130, 2.7, 0.3, 28.2);
+        rice.YieldFactor = 2.8;
+        rice.RecipeGramsAreRaw = false; // the recipe states cooked rice
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
+        var bowl = await recipes.CreateAsync(new CreateRecipeRequest("Rice bowl", 1, 10, null, ["dinner"],
+            [new RecipeIngredientInput(280, "g", "rice")]), ownerUserId: userId);
+
+        var shopping = new ShoppingListService(db, db);
+        var list = await shopping.GenerateAsync(userId, [new ShoppingRecipeLine(bowl.Id, 1)], mealPlanId: null);
+
+        // 280 g cooked rice ⇒ buy 100 g raw (280 / 2.8). Shopping is in RAW purchase weight.
+        var riceItem = list.Aisles.SelectMany(a => a.Items).Single(i => i.IngredientName == "rice");
+        Assert.Equal(100, riceItem.Grams, 1);
     }
 
     [Theory]

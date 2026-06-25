@@ -116,6 +116,13 @@ dotnet user-secrets --project src/NutriForge.AppHost set Parameters:openai-api-k
 #   …or leave it unset and let the Aspire dashboard prompt you for the value on first run.
 #   (optional) export OPENAI_CHAT_MODEL_NAME=gpt-4o-mini   # default model
 
+# OPTIONAL: a YouTube Data API key lets recipe import auto-read the video DESCRIPTION (where the
+# recipe usually is). Without it import still works via oEmbed (title/thumbnail) + pasted text, so
+# it never blocks startup — it's a first-class Aspire parameter with an empty default.
+#   dotnet user-secrets --project src/NutriForge.AppHost set Parameters:youtube-api-key "AIza..."
+#   …or export YOUTUBE_API_KEY=AIza...   (bridged to the parameter)
+#   …or set/leave it in the Aspire dashboard's Parameters; unset is fine (import just degrades).
+
 # run the whole system (API + Postgres + Redis + SPA) — needs Docker running
 ./scripts/run-and-wait.ps1          # or: dotnet run --project src/NutriForge.AppHost
 #   → open the Aspire dashboard URL it prints; the SPA + API resources are listed there.
@@ -134,7 +141,22 @@ endpoint by hand.
 
 In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required): send
 `X-Debug-Subject` to act as a user, `X-Debug-Role` to pick `user`/`admin`; **no subject header ⇒
-anonymous**. **Epic 4 (low-friction logging) is built**: barcode lookup with Open Food Facts
+anonymous**.
+
+**Production auth (Entra External ID).** Outside Development the dev scheme is disabled — the API
+**fails to start** unless a real OIDC authority is configured, so a deployment can never be bypassed
+with headers. To go live:
+1. Create an **Entra External ID** (CIAM) tenant. Register an **API** app (Expose an API → add a
+   scope) and a **SPA** app (SPA platform, redirect URI = your SPA origin; Auth-Code + PKCE).
+2. Define an **`admin`** app role on the API app and assign it to admin users (other users default
+   to `user`).
+3. Configure the API: `Authentication__Authority` = your CIAM authority URL,
+   `Authentication__Audience` = the API app's client-id / Application-ID-URI. (`Authentication__RoleClaim`
+   defaults to `roles`; JWT subject/role mapping is already wired.)
+4. Point the SPA at the same tenant/client via `VITE_AUTH_AUTHORITY` / `VITE_AUTH_CLIENT_ID` /
+   `VITE_AUTH_SCOPE`. The SPA MSAL (Auth-Code + PKCE) login flow is the remaining piece of #56.
+
+**Epic 4 (low-friction logging) is built**: barcode lookup with Open Food Facts
 fetch-on-miss (`GET /api/v1/foods/barcode/{gtin}`) and natural-language entry
 (`POST /api/v1/diary/parse` — "2 eggs and toast" → confirmable candidates; the LLM only parses,
 deterministic code owns the numbers; needs `OPENAI_API_KEY`).

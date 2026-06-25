@@ -6,12 +6,20 @@
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Postgres with an Aspire-generated password (persisted to user-secrets for `dotnet run`;
-// regenerated per run in CI/tests, where containers start clean). Production does NOT run this
-// AppHost — Terraform/Container Apps inject the real connection strings (ADR-0013) — so no
-// hand-managed secret parameter is needed here. Ephemeral container (no data volume) keeps dev
-// and integration-test runs deterministic: a fresh password never collides with a stale volume.
+// Integration tests run the AppHost headless (SKIP_NPM_APPS=true): no SPA, the assistant left
+// unconfigured (to assert its 503 path), the OpenAI key not required, and an EPHEMERAL database
+// (a fresh, deterministic DB each run). A normal `dotnet run` / `aspire run` is the opposite.
+var underTest = string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase);
+
+// Postgres with an Aspire-generated password (persisted to user-secrets for `dotnet run`, so it is
+// stable across restarts). Production does NOT run this AppHost — Terraform/Container Apps inject the
+// real connection strings (ADR-0013). For local dev we attach a DATA VOLUME so your data (profile,
+// diary, recipes, plans) survives a restart; tests stay volumeless so each run starts clean.
 var postgres = builder.AddPostgres("postgres");
+if (!underTest)
+{
+    postgres.WithDataVolume();
+}
 
 var appDb = postgres.AddDatabase("appdb");       // foods, recipes, diary, plans, outbox, idempotency
 var auditDb = postgres.AddDatabase("auditdb");   // append-only audit, outside the operational DB
@@ -25,11 +33,6 @@ var api = builder.AddProject<Projects.NutriForge_Api>("api")
     .WithReference(cache).WaitFor(cache)
     .WithExternalHttpEndpoints();
 
-// Integration tests run the AppHost headless: no SPA, and the NutritionAssistant deliberately
-// unconfigured so they can assert its 503 graceful-degradation path. They signal this via
-// SKIP_NPM_APPS, which therefore also exempts them from the OpenAI-key requirement below.
-var underTest = string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", StringComparison.OrdinalIgnoreCase);
-
 // The MAF NutritionAssistant is a core capability, not an optional add-on: a real run MUST be
 // configured with an OpenAI key. Express that the Aspire way — a first-class secret *parameter* —
 // instead of hand-throwing. An unresolved parameter is surfaced by Aspire with a clear, masked
@@ -40,9 +43,12 @@ var underTest = string.Equals(builder.Configuration["SKIP_NPM_APPS"], "true", St
 //   • the Aspire dashboard's "set parameter value" prompt
 if (!underTest)
 {
+    // Precedence: user-secrets (Parameters:openai-api-key) wins; OPENAI_API_KEY only fills in when
+    // user-secrets didn't set it (note the ??=); otherwise the parameter is unresolved and Aspire
+    // prompts. REQUIRED — an unresolved parameter blocks API startup (the assistant is a core capability).
     if (Environment.GetEnvironmentVariable("OPENAI_API_KEY") is { Length: > 0 } envKey)
     {
-        builder.Configuration["Parameters:openai-api-key"] = envKey;
+        builder.Configuration["Parameters:openai-api-key"] ??= envKey;
     }
 
     var openAiKey = builder.AddParameter("openai-api-key", secret: true);
@@ -50,6 +56,23 @@ if (!underTest)
     api.WithEnvironment("Ai__Provider", "OpenAI")
         .WithEnvironment("Ai__Model", Environment.GetEnvironmentVariable("OPENAI_CHAT_MODEL_NAME") ?? "gpt-4o-mini")
         .WithEnvironment("Ai__ApiKey", openAiKey);
+
+    // YouTube Data API key — OPTIONAL. With it, recipe import auto-reads the video DESCRIPTION (where the
+    // recipe usually lives); without it, import degrades to keyless oEmbed (title + thumbnail) + pasted
+    // recipe text. So unlike the OpenAI key it must NEVER block startup. We still surface it as a
+    // first-class secret parameter (settable in the Aspire dashboard / user-secrets, just like the OpenAI
+    // key) but give it an EMPTY DEFAULT, set LAST so it only applies when neither user-secrets nor the
+    // YOUTUBE_API_KEY env supplied a value — an unset key then resolves to "" instead of halting the app
+    // (and an empty key makes YouTubeMetadataClient fall back to oEmbed).
+    if (Environment.GetEnvironmentVariable("YOUTUBE_API_KEY") is { Length: > 0 } ytKey)
+    {
+        builder.Configuration["Parameters:youtube-api-key"] ??= ytKey;
+    }
+
+    builder.Configuration["Parameters:youtube-api-key"] ??= "";
+
+    var youTubeKey = builder.AddParameter("youtube-api-key", secret: true);
+    api.WithEnvironment("YouTube__ApiKey", youTubeKey);
 }
 
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right

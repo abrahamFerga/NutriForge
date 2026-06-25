@@ -8,9 +8,14 @@ import {
   AlertTriangle,
   Check,
   ChefHat,
+  CookingPot,
   FileDown,
+  Flame,
+  Plus,
   ShoppingCart,
   Sparkles,
+  Users,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +30,8 @@ import { dietPlansApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   AdherencePoint,
+  BatchCookPlanDto,
+  BatchCookStep,
   CreateDietPlanRequest,
   DietPlanDto,
   DietPlanSlot,
@@ -76,23 +83,36 @@ export function Plan() {
 
 // -------------------- Generation form --------------------
 
+/** A row in the "Cooking for" editor — an additional person besides the owner ("You"). */
+type MemberRow = { name: string; mode: "same" | "own"; kcal: string };
+
 function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [dietSlug, setDietSlug] = useState<DietSlug | "">("");
   const [kcalTarget, setKcalTarget] = useState("");
   const [maxPrep, setMaxPrep] = useState("");
   const [days, setDays] = useState("7");
-  const [eaters, setEaters] = useState("1");
+  const [blockSize, setBlockSize] = useState("1");
+  const [members, setMembers] = useState<MemberRow[]>([]);
   const [desire, setDesire] = useState("");
+
+  function updateMember(i: number, patch: Partial<MemberRow>) {
+    setMembers((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
+  }
 
   const create = useMutation({
     mutationFn: () => {
-      const body: CreateDietPlanRequest = {
-        horizonDays: Number(days) || 7,
-        eaters: Math.min(9, Math.max(1, Number(eaters) || 1)),
-      };
+      const body: CreateDietPlanRequest = { horizonDays: Number(days) || 7 };
+      const memberInputs = members
+        .filter((m) => m.name.trim().length > 0)
+        .map((m) => ({
+          name: m.name.trim(),
+          targetKcal: m.mode === "own" ? Number(m.kcal) || undefined : undefined,
+        }));
+      if (memberInputs.length > 0) body.members = memberInputs;
       if (dietSlug) body.dietSlug = dietSlug;
       if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
       if (maxPrep.trim()) body.maxPrepMinutes = Number(maxPrep);
+      if (Number(blockSize) > 1) body.blockSize = Number(blockSize);
       if (desire.trim()) body.desire = desire.trim();
       return dietPlansApi.create(body);
     },
@@ -158,17 +178,83 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="eaters">People</Label>
+            <Label htmlFor="block-size">Cook every (days)</Label>
             <Input
-              id="eaters"
+              id="block-size"
               type="number"
               min={1}
-              max={9}
-              value={eaters}
-              onChange={(e) => setEaters(e.target.value)}
+              max={Number(days) || 30}
+              value={blockSize}
+              onChange={(e) => setBlockSize(e.target.value)}
             />
-            <p className="text-xs text-slate-500">Cook &amp; shop for this many.</p>
+            <p className="text-[11px] text-slate-500">
+              Batch-cook: 1 = fresh daily; 3 = cook once, eat 3 days.
+            </p>
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Cooking for</Label>
+          <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
+            <Users className="h-4 w-4 text-slate-500" />
+            <span className="font-medium text-slate-100">You</span>
+            <span className="text-xs text-slate-500">· your target</span>
+          </div>
+
+          {members.map((m, i) => (
+            <div
+              key={i}
+              className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2"
+            >
+              <div className="flex items-center gap-2">
+                <Input
+                  value={m.name}
+                  onChange={(e) => updateMember(i, { name: e.target.value })}
+                  placeholder="e.g. Girlfriend"
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setMembers((prev) => prev.filter((_, idx) => idx !== i))}
+                  aria-label="Remove person"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={m.mode}
+                  onChange={(e) => updateMember(i, { mode: e.target.value as "same" | "own" })}
+                >
+                  <option value="same">Same as me</option>
+                  <option value="own">Own calorie target</option>
+                </Select>
+                {m.mode === "own" ? (
+                  <Input
+                    type="number"
+                    min={800}
+                    max={6000}
+                    value={m.kcal}
+                    onChange={(e) => updateMember(i, { kcal: e.target.value })}
+                    placeholder="kcal"
+                    className="w-32"
+                  />
+                ) : null}
+              </div>
+            </div>
+          ))}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMembers((prev) => [...prev, { name: "", mode: "same", kcal: "" }])}
+          >
+            <Plus className="h-4 w-4" />
+            Add person
+          </Button>
+          <p className="text-xs text-slate-500">
+            Everyone eats the same meals; each person&apos;s portion scales to their target.
+          </p>
         </div>
 
         <div className="space-y-1">
@@ -301,13 +387,17 @@ function GeneratingCard({ timedOut }: { timedOut?: boolean }) {
 function ReadyPlan({ plan }: { plan: DietPlanDto }) {
   const qc = useQueryClient();
   const [shoppingList, setShoppingList] = useState<ShoppingListDto | null>(null);
+  const [batchCook, setBatchCook] = useState<BatchCookPlanDto | null>(null);
 
+  // Each entry is one BLOCK (a distinct meal-set); with blockSize 1 a block is a single day.
   const days = useMemo(() => groupByDay(plan.slots), [plan.slots]);
-  const dayCount = days.length;
   const eaters = plan.eaters ?? 1;
-  // achieved* are already PER-EATER, PER-DAY averages from the server. Show them as-is: do NOT
-  // divide by dayCount again (that was a bug — it showed ~target/days), and NEVER multiply by
-  // eaters (these describe one person's day; only cook totals + the shopping list scale by people).
+  const members = plan.members ?? [];
+  // `portion` = Σ member factors (or eaters when no members) — scales cook totals + shopping only.
+  const portion = plan.portionMultiplier ?? eaters;
+  // achieved* are already PER-PRIMARY, PER-DAY averages from the server. Show them as-is: never
+  // re-divide by the block/day count and never multiply by the headcount (they describe ONE person's
+  // day; each member's portion = achieved × their factor).
 
   const accept = useMutation({
     mutationFn: () => dietPlansApi.accept(plan.id),
@@ -319,6 +409,11 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
   const genList = useMutation({
     mutationFn: () => dietPlansApi.shoppingList(plan.id),
     onSuccess: (list) => setShoppingList(list),
+  });
+
+  const genBatch = useMutation({
+    mutationFn: () => dietPlansApi.batchCook(plan.id),
+    onSuccess: (guide) => setBatchCook(guide),
   });
 
   const downloadPdf = useMutation({
@@ -378,6 +473,25 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
             <Stat label="Carbs/day" value={`${round(plan.achievedCarbG)}g`} />
           </div>
 
+          {members.length > 1 ? (
+            <div className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2">
+              <p className="mb-1.5 text-xs font-medium tracking-wide text-slate-500 uppercase">
+                Portions per person
+              </p>
+              <ul className="space-y-1">
+                {members.map((m, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="truncate text-slate-100">{m.name}</span>
+                    <span className="shrink-0 text-xs text-slate-400">
+                      ~{round(plan.achievedKcal * m.portionFactor)} kcal/day ·{" "}
+                      {round(m.portionFactor, 2)}× portions
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {plan.message ? (
             <p className="rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm text-slate-300">
               {plan.message}
@@ -386,6 +500,7 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
 
           {accept.isError ? <ErrorState error={accept.error} /> : null}
           {genList.isError ? <ErrorState error={genList.error} /> : null}
+          {genBatch.isError ? <ErrorState error={genBatch.error} /> : null}
           {downloadPdf.isError ? <ErrorState error={downloadPdf.error} /> : null}
 
           <div className="flex flex-wrap gap-2">
@@ -409,6 +524,14 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
             </Button>
             <Button
               variant="outline"
+              onClick={() => genBatch.mutate()}
+              disabled={genBatch.isPending}
+            >
+              {genBatch.isPending ? <Spinner /> : <CookingPot className="h-4 w-4" />}
+              Batch-cook guide
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => downloadPdf.mutate()}
               disabled={downloadPdf.isPending}
             >
@@ -419,15 +542,34 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
         </CardContent>
       </Card>
 
+      {batchCook ? <BatchCookGuide guide={batchCook} /> : null}
+
       <Card>
         <CardHeader>
           <CardTitle>Meal plan</CardTitle>
+          {plan.blockSize > 1 ? (
+            <p className="text-xs text-slate-400">
+              Cooked as {plan.numBlocks} batches — cook each meal-set once, eat it
+              for up to {plan.blockSize} days.
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-5">
-          {days.map(({ day, slots }) => (
+          {days.map(({ day, slots }) => {
+            const span = blockSpan(day, plan.blockSize, plan.horizonDays);
+            return (
             <div key={day}>
-              <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                Day {day}
+              <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                {plan.blockSize > 1 ? (
+                  <>
+                    <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+                      Block {day}
+                    </span>
+                    {span.label}
+                  </>
+                ) : (
+                  <>{span.label}</>
+                )}
               </h3>
               <div className="overflow-x-auto rounded-lg border border-slate-800">
                 <table className="w-full text-sm">
@@ -445,9 +587,9 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
                           <span className="text-xs text-slate-500">
                             {round(slot.servings, 2)} serving
                             {slot.servings === 1 ? "" : "s"}
-                            {eaters > 1 ? "/person" : ""}
-                            {eaters > 1
-                              ? ` · cook ${round(slot.servings * eaters, 2)} total`
+                            {portion > 1 || span.days > 1 ? "/person/day" : ""}
+                            {portion > 1 || span.days > 1
+                              ? ` · cook ${round(slot.servings * portion * span.days, 2)} for this block`
                               : ""}
                           </span>
                         </td>
@@ -463,7 +605,8 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
                 </table>
               </div>
             </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
 
@@ -472,9 +615,11 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
           <CardHeader>
             <CardTitle>Shopping list</CardTitle>
             <p className="text-xs text-slate-500">
-              Totals for {dayCount} {dayCount === 1 ? "day" : "days"} ×{" "}
-              {eaters} {eaters === 1 ? "person" : "people"} ={" "}
-              {dayCount * eaters} person-days
+              Totals for {plan.horizonDays}{" "}
+              {plan.horizonDays === 1 ? "day" : "days"} ·{" "}
+              {eaters} {eaters === 1 ? "person" : "people"}
+              {plan.blockSize > 1 ? ` · ${plan.numBlocks} batches` : ""}
+              {members.length > 1 ? ` (${round(portion, 2)}× portions)` : ""}
             </p>
           </CardHeader>
           <CardContent>
@@ -564,6 +709,73 @@ function Stat({
   );
 }
 
+// -------------------- Batch-cook guide (#86) --------------------
+
+function BatchCookGuide({ guide }: { guide: BatchCookPlanDto }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Batch-cook guide</CardTitle>
+        <p className="text-xs text-slate-400">
+          Cook once per block in RAW weight for {guide.eaters}{" "}
+          {guide.eaters === 1 ? "person" : "people"}, then split into portions.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {guide.blocks.map((block) => {
+          const byMethod = new Map<string, BatchCookStep[]>();
+          for (const s of block.steps) {
+            const arr = byMethod.get(s.method);
+            if (arr) arr.push(s);
+            else byMethod.set(s.method, [s]);
+          }
+          return (
+            <div key={block.block}>
+              <h3 className="mb-2 flex flex-wrap items-center gap-2 text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+                  Block {block.block}
+                </span>
+                {block.days} · portion into {block.portions}
+              </h3>
+              <div className="space-y-3">
+                {[...byMethod.entries()].map(([method, steps]) => (
+                  <div
+                    key={method}
+                    className="rounded-lg border border-slate-800 bg-slate-950/40 p-3"
+                  >
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-300">
+                      <Flame className="h-3.5 w-3.5 text-orange-400" />
+                      {method}
+                    </p>
+                    {steps.map((s, i) => (
+                      <div key={i} className="mb-2 last:mb-0">
+                        <p className="text-sm text-slate-100">
+                          {s.recipeName}
+                          <span className="ml-1.5 text-xs text-slate-500">
+                            → cook {round(s.cookServings, 1)} servings · portion
+                            into {s.portionInto}
+                          </span>
+                        </p>
+                        <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-400">
+                          {s.ingredients.map((ing, j) => (
+                            <li key={j}>
+                              {round(ing.rawGrams)}g {ing.name}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
 function groupByDay(
   slots: DietPlanSlot[],
 ): { day: number; slots: DietPlanSlot[] }[] {
@@ -576,4 +788,21 @@ function groupByDay(
   return [...map.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([day, daySlots]) => ({ day, slots: daySlots }));
+}
+
+/**
+ * The calendar-day span a block (1-indexed) covers, plus a label. With blockSize 1 this is a single
+ * day ("Day N"); otherwise a range ("Days 1–3"), the last block shorter when the horizon isn't a
+ * whole multiple. `days` is how many days the block feeds — the batch-cook multiplier.
+ */
+function blockSpan(
+  blockIndex: number,
+  blockSize: number,
+  horizonDays: number,
+): { label: string; days: number } {
+  const size = Math.max(blockSize, 1);
+  const start = (blockIndex - 1) * size + 1;
+  const end = Math.min(blockIndex * size, horizonDays);
+  const days = Math.max(end - start + 1, 1);
+  return { label: start === end ? `Day ${start}` : `Days ${start}–${end}`, days };
 }

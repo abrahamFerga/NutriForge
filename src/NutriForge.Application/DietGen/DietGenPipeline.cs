@@ -64,9 +64,11 @@ public static class PlanVerifier
 {
     public const double KcalTolerancePct = 0.05;
 
-    public static (bool Ok, Macros DailyAverage) Verify(IReadOnlyList<PlannedSlot> slots, double kcalTarget, int horizonDays)
+    // distinctMealDays = the number of distinct meal-sets generated (= NumBlocks). Every calendar day eats
+    // exactly one of these sets, so the per-DAY average is the total over the distinct sets ÷ that count.
+    public static (bool Ok, Macros DailyAverage) Verify(IReadOnlyList<PlannedSlot> slots, double kcalTarget, int distinctMealDays)
     {
-        var days = Math.Max(horizonDays, 1);
+        var days = Math.Max(distinctMealDays, 1);
         var total = slots.Aggregate(Macros.Zero, (acc, s) => acc + s.Macros);
         var avg = total.Scale(1.0 / days).Rounded();
         var ok = kcalTarget > 0 && Math.Abs(avg.Kcal - kcalTarget) <= kcalTarget * KcalTolerancePct;
@@ -110,12 +112,17 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
                 "No recipes match your constraints — relax the diet/prep time or add recipes.");
         }
 
-        var slots = GreedySelect(pool, intent, kcalTarget, mealsPerDay);
+        // Day-block rotation: cook one distinct meal-set per block, not per calendar day. blockSize=1 ⇒
+        // numBlocks=HorizonDays ⇒ a fresh set every day (the original behaviour).
+        var blockSize = Math.Clamp(intent.BlockSize, 1, Math.Max(intent.HorizonDays, 1));
+        var numBlocks = (int)Math.Ceiling(Math.Max(intent.HorizonDays, 1) / (double)blockSize);
 
-        var (ok, avg) = PlanVerifier.Verify(slots, kcalTarget, intent.HorizonDays);
+        var slots = GreedySelect(pool, intent, kcalTarget, mealsPerDay, numBlocks);
+
+        var (ok, avg) = PlanVerifier.Verify(slots, kcalTarget, numBlocks);
         if (!ok)
         {
-            // REPAIR: solve for servings that hit the daily targets.
+            // REPAIR: solve for servings that hit the daily targets (each block is one day-group).
             var optimizerSlots = slots.Select(s => new OptimizerSlot(s.Day, s.Recipe.KcalPerServing, s.Recipe.ProteinPerServing)).ToList();
             var servings = optimizer.Optimize(optimizerSlots, kcalTarget, intent.ProteinTarget, 0.5, 3.0);
             for (var i = 0; i < slots.Count && i < servings.Count; i++)
@@ -123,7 +130,7 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
                 slots[i].Servings = Math.Round(servings[i], 2);
             }
 
-            (ok, avg) = PlanVerifier.Verify(slots, kcalTarget, intent.HorizonDays);
+            (ok, avg) = PlanVerifier.Verify(slots, kcalTarget, numBlocks);
         }
 
         // Final defense-in-depth allergen re-check.
@@ -141,14 +148,17 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
         return new GenerationResult(true, slots, avg, Explain(avg, kcalTarget, intent));
     }
 
-    private static List<PlannedSlot> GreedySelect(IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget, int mealsPerDay)
+    // One distinct meal-set per BLOCK (Day = block index 1..numBlocks). With numBlocks == HorizonDays
+    // (blockSize 1) this is the original per-day selection.
+    private static List<PlannedSlot> GreedySelect(
+        IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget, int mealsPerDay, int numBlocks)
     {
         var meals = AllMeals.Take(mealsPerDay).ToArray();
         var perMeal = kcalTarget / mealsPerDay;
         var slots = new List<PlannedSlot>();
         var index = 0;
 
-        for (var day = 1; day <= intent.HorizonDays; day++)
+        for (var block = 1; block <= numBlocks; block++)
         {
             foreach (var meal in meals)
             {
@@ -156,7 +166,7 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
                 index++;
                 var raw = recipe.KcalPerServing > 0 ? perMeal / recipe.KcalPerServing : 1;
                 var servings = Math.Clamp(Math.Round(raw * 2, MidpointRounding.AwayFromZero) / 2, 0.5, 3.0); // nearest 0.5
-                slots.Add(new PlannedSlot { Day = day, Meal = meal, Recipe = recipe, Servings = servings });
+                slots.Add(new PlannedSlot { Day = block, Meal = meal, Recipe = recipe, Servings = servings });
             }
         }
 
@@ -168,7 +178,10 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
         var withinPct = kcalTarget > 0 ? Math.Abs(avg.Kcal - kcalTarget) / kcalTarget * 100 : 0;
         var diet = string.IsNullOrEmpty(intent.DietSlug) ? "" : $", all {intent.DietSlug}";
         var prep = intent.MaxPrepMinutes is { } p ? $", nothing over {p} min" : "";
+        var blockSize = Math.Clamp(intent.BlockSize, 1, Math.Max(intent.HorizonDays, 1));
+        var numBlocks = (int)Math.Ceiling(Math.Max(intent.HorizonDays, 1) / (double)blockSize);
+        var batch = blockSize > 1 ? $", cooked as {numBlocks} batch{(numBlocks == 1 ? "" : "es")} of up to {blockSize} days" : "";
         return $"Your {intent.HorizonDays}-day plan averages {avg.Kcal:0} kcal/day "
-            + $"(within {withinPct:0.#}% of your {kcalTarget:0} target), protein {avg.ProteinG:0} g{diet}{prep}.";
+            + $"(within {withinPct:0.#}% of your {kcalTarget:0} target), protein {avg.ProteinG:0} g{diet}{prep}{batch}.";
     }
 }

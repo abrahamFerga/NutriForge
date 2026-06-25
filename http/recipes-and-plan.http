@@ -2,11 +2,11 @@
 @host = https://localhost:7443
 @subject = demo-user
 
-### List recipes (seeded computed-nutrition recipes)
+### List recipes — seeded recipes are GLOBAL (isGlobal); your imports are private (isMine).
 GET {{host}}/api/v1/recipes
 X-Debug-Subject: {{subject}}
 
-### Create a recipe (nutrition is computed from resolved ingredients)
+### Create a recipe (nutrition is computed from resolved ingredients). Private to {{subject}}.
 POST {{host}}/api/v1/recipes
 X-Debug-Subject: {{subject}}
 Idempotency-Key: {{$guid}}
@@ -23,6 +23,50 @@ Content-Type: application/json
     { "quantity": 100, "unit": "g", "name": "spinach" }
   ]
 }
+
+### Edit a recipe you own (404 if not visible, 403 if visible-but-not-yours).
+PUT {{host}}/api/v1/recipes/REPLACE-WITH-RECIPE-ID
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "name": "Tofu rice bowl (edited)",
+  "servings": 3,
+  "totalMinutes": 25,
+  "tags": ["vegan", "high-protein", "dinner"],
+  "ingredients": [
+    { "quantity": 300, "unit": "g", "name": "tofu" },
+    { "quantity": 400, "unit": "g", "name": "white rice" }
+  ]
+}
+
+### Delete a recipe you own.
+DELETE {{host}}/api/v1/recipes/REPLACE-WITH-RECIPE-ID
+X-Debug-Subject: {{subject}}
+Idempotency-Key: {{$guid}}
+
+### Admin: create a GLOBAL recipe everyone can use (Global honored only for the admin role).
+POST {{host}}/api/v1/recipes
+X-Debug-Subject: admin-user
+X-Debug-Role: admin
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "name": "House high-protein bowl",
+  "servings": 2,
+  "totalMinutes": 15,
+  "tags": ["high-protein", "dinner"],
+  "ingredients": [ { "quantity": 200, "unit": "g", "name": "chicken" } ],
+  "global": true
+}
+
+### Admin: promote one of your private recipes to GLOBAL (admin-only; 403 for a plain user).
+POST {{host}}/api/v1/recipes/REPLACE-WITH-RECIPE-ID/promote-global
+X-Debug-Subject: admin-user
+X-Debug-Role: admin
+Idempotency-Key: {{$guid}}
 
 ### Generate a diet plan (structured — no LLM key needed). Returns 202 + a plan id.
 POST {{host}}/api/v1/diet-plans

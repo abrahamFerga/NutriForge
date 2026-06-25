@@ -2,9 +2,11 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Barcode,
+  Camera,
   ChevronLeft,
   ChevronRight,
   Check,
+  Copy,
   Plus,
   Search,
   Sparkles,
@@ -31,10 +33,13 @@ import {
   type FoodSummary,
   type MealSlot,
   type ParseCandidate,
+  type PhotoAnalysisResult,
+  type PhotoFoodCandidate,
 } from "@/lib/types";
 import { cn, round, toIsoDate, today } from "@/lib/utils";
 
 export function Diary() {
+  const qc = useQueryClient();
   const [date, setDate] = useState<string>(today());
   const [mealSlot, setMealSlot] = useState<MealSlot>("Breakfast");
 
@@ -47,6 +52,31 @@ export function Diary() {
     setDate(toIsoDate(d));
   }
 
+  // Copy every entry from the previous day onto this day (re-logged by grams, so each gets a fresh
+  // log-time nutrition snapshot). Reuses the normal GET/POST diary endpoints — no backend change.
+  const copyYesterday = useMutation({
+    mutationFn: async () => {
+      const y = new Date(date + "T00:00:00");
+      y.setDate(y.getDate() - 1);
+      const prev = await diaryApi.get(toIsoDate(y));
+      for (const e of prev.entries) {
+        await diaryApi.create({
+          date,
+          mealSlot: e.mealSlot,
+          foodId: e.foodId,
+          portionId: null,
+          quantity: e.grams,
+        });
+      }
+      return prev.entries.length;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.diary(date) });
+      qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+    },
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -54,7 +84,17 @@ export function Diary() {
           <h1 className="text-2xl font-bold text-slate-100">Diary</h1>
           <p className="text-sm text-slate-400">Log and review your day</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => copyYesterday.mutate()}
+            disabled={copyYesterday.isPending}
+            title="Copy yesterday's entries onto this day"
+          >
+            {copyYesterday.isPending ? <Spinner /> : <Copy className="h-4 w-4" />}
+            Copy yesterday
+          </Button>
           <Button variant="outline" size="icon" onClick={() => shiftDate(-1)} aria-label="Previous day">
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -69,6 +109,8 @@ export function Diary() {
           </Button>
         </div>
       </div>
+
+      {copyYesterday.isError ? <ErrorState error={copyYesterday.error} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Add food: Search | Describe | Barcode */}
@@ -103,11 +145,12 @@ export function Diary() {
 
 // -------------------- Add food (tabbed) --------------------
 
-type AddTab = "search" | "describe" | "barcode";
+type AddTab = "search" | "describe" | "photo" | "barcode";
 
 const TABS: { id: AddTab; label: string; icon: typeof Search }[] = [
   { id: "search", label: "Search", icon: Search },
   { id: "describe", label: "Describe", icon: Sparkles },
+  { id: "photo", label: "Photo", icon: Camera },
   { id: "barcode", label: "Barcode", icon: Barcode },
 ];
 
@@ -160,7 +203,7 @@ function AddFood({
         <div
           role="tablist"
           aria-label="Add food method"
-          className="grid grid-cols-3 gap-1 rounded-lg border border-slate-800 bg-slate-950/40 p-1"
+          className="grid grid-cols-2 gap-1 rounded-lg border border-slate-800 bg-slate-950/40 p-1 sm:grid-cols-4"
         >
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -185,6 +228,12 @@ function AddFood({
           <SearchTab date={date} />
         ) : tab === "describe" ? (
           <DescribeTab
+            date={date}
+            mealSlot={mealSlot}
+            onMealSlotChange={onMealSlotChange}
+          />
+        ) : tab === "photo" ? (
+          <PhotoTab
             date={date}
             mealSlot={mealSlot}
             onMealSlotChange={onMealSlotChange}
@@ -525,6 +574,178 @@ function CandidateRow({
           {log.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
           Log
         </Button>
+      )}
+    </div>
+  );
+}
+
+// -------------------- Photo tab --------------------
+
+function PhotoTab({
+  date,
+  mealSlot,
+  onMealSlotChange,
+}: {
+  date: string;
+  mealSlot: MealSlot;
+  onMealSlotChange: (slot: MealSlot) => void;
+}) {
+  const [logged, setLogged] = useState<Record<number, boolean>>({});
+
+  const analyze = useMutation<PhotoAnalysisResult, unknown, File>({
+    mutationFn: (file) => diaryApi.parsePhoto(file, mealSlot, date),
+    onSuccess: () => setLogged({}),
+  });
+
+  const noProvider =
+    analyze.error instanceof ApiError && analyze.error.status === 503;
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) analyze.mutate(file);
+    e.target.value = ""; // allow re-picking the same file
+  }
+
+  return (
+    <div className="space-y-3">
+      <MealSlotSelect id="photo-meal" value={mealSlot} onChange={onMealSlotChange} />
+
+      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 bg-slate-950/40 px-4 py-6 text-sm font-medium text-slate-300 hover:border-brand-500 hover:text-slate-100">
+        {analyze.isPending ? <Spinner /> : <Camera className="h-6 w-6" />}
+        {analyze.isPending ? "Analyzing photo…" : "Take or upload a meal photo"}
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={onPick}
+          disabled={analyze.isPending}
+        />
+      </label>
+
+      <p className="text-xs text-slate-500">
+        A vision model guesses the foods &amp; portions. Matched foods use catalog
+        nutrition; others show an AI estimate. Nothing is logged until you confirm.
+      </p>
+
+      {noProvider ? (
+        <p className="rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+          Photo logging needs a vision provider — set OPENAI_API_KEY.
+        </p>
+      ) : analyze.isError ? (
+        <ErrorState error={analyze.error} />
+      ) : null}
+
+      {analyze.data ? (
+        <PhotoResults
+          result={analyze.data}
+          date={date}
+          mealSlot={mealSlot}
+          logged={logged}
+          onLogged={(i) => setLogged((prev) => ({ ...prev, [i]: true }))}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function PhotoResults({
+  result,
+  date,
+  mealSlot,
+  logged,
+  onLogged,
+}: {
+  result: PhotoAnalysisResult;
+  date: string;
+  mealSlot: MealSlot;
+  logged: Record<number, boolean>;
+  onLogged: (index: number) => void;
+}) {
+  if (result.items.length === 0) {
+    return (
+      <p className="py-4 text-center text-sm text-slate-500">
+        No foods recognized in that photo.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-slate-800 overflow-hidden rounded-lg border border-slate-800">
+      {result.items.map((item, i) => (
+        <li key={i}>
+          <PhotoCandidateRow
+            item={item}
+            date={date}
+            mealSlot={mealSlot}
+            logged={logged[i] ?? false}
+            onLogged={() => onLogged(i)}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PhotoCandidateRow({
+  item,
+  date,
+  mealSlot,
+  logged,
+  onLogged,
+}: {
+  item: PhotoFoodCandidate;
+  date: string;
+  mealSlot: MealSlot;
+  logged: boolean;
+  onLogged: () => void;
+}) {
+  const log = useLogEntry();
+  const canLog = item.source === "catalog" && item.foodId !== null;
+
+  function submit() {
+    if (!canLog || !item.foodId) return;
+    log.mutate(
+      {
+        date,
+        mealSlot,
+        foodId: item.foodId,
+        portionId: item.portionId,
+        quantity: item.quantity,
+      },
+      { onSuccess: onLogged },
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="flex items-center gap-2 truncate text-sm font-medium text-slate-100">
+          <span className="truncate">{item.label}</span>
+          {item.source === "estimate" ? (
+            <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+              AI estimate
+            </span>
+          ) : null}
+        </p>
+        <p className="truncate text-xs text-slate-500">
+          ~{round(item.grams)} g · {round(item.kcal)} kcal
+        </p>
+      </div>
+      {canLog ? (
+        logged ? (
+          <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-emerald-300">
+            <Check className="h-4 w-4" />
+            Logged
+          </span>
+        ) : (
+          <Button size="sm" onClick={submit} disabled={log.isPending} className="shrink-0">
+            {log.isPending ? <Spinner /> : <Plus className="h-4 w-4" />}
+            Log
+          </Button>
+        )
+      ) : (
+        <span className="shrink-0 text-xs text-slate-500">estimate only</span>
       )}
     </div>
   );

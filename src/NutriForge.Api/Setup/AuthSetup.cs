@@ -20,6 +20,17 @@ public static class AuthSetup
         var audience = config["Authentication:Audience"];
         var useJwt = !string.IsNullOrWhiteSpace(authority);
 
+        // Fail closed (#56): the header-based dev scheme trusts X-Debug-Subject / X-Debug-Role verbatim,
+        // so anyone could claim any identity or the admin role. It is therefore allowed ONLY in
+        // Development. A deployed API must validate real OIDC tokens — if no Authority is configured
+        // outside Development we refuse to start rather than silently expose an auth bypass.
+        if (!env.IsDevelopment() && !useJwt)
+        {
+            throw new InvalidOperationException(
+                "Authentication:Authority must be configured outside Development. The dev header auth " +
+                "scheme is disabled in deployed environments to prevent an identity/role bypass.");
+        }
+
         var auth = services.AddAuthentication(options =>
         {
             var scheme = useJwt ? JwtBearerDefaults.AuthenticationScheme : DevAuthenticationHandler.SchemeName;
@@ -29,12 +40,18 @@ public static class AuthSetup
 
         if (useJwt)
         {
+            // Entra External ID (CIAM) issues the subject in "sub" and app-role assignments in "roles".
+            // Map those so HttpCurrentUser.Subject and the RequireRole(admin) policy work unchanged. The
+            // role-claim type is overridable for other IdPs via Authentication:RoleClaim.
+            var roleClaim = config["Authentication:RoleClaim"] ?? "roles";
             auth.AddJwtBearer(options =>
             {
                 options.Authority = authority;
                 options.Audience = audience;
+                options.MapInboundClaims = false; // keep raw "sub"/"roles" claim types
                 options.TokenValidationParameters.ValidateAudience = !string.IsNullOrWhiteSpace(audience);
-                options.MapInboundClaims = false; // keep the raw "sub"/"role" claim types
+                options.TokenValidationParameters.NameClaimType = "sub";
+                options.TokenValidationParameters.RoleClaimType = roleClaim;
             });
         }
         else

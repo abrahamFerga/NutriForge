@@ -14,7 +14,9 @@ namespace NutriForge.Infrastructure.Persistence;
 /// The operational store (database <c>appdb</c>). Holds the public-read catalog (schema
 /// <c>catalog</c>) and the user-owned data + infra tables (schema <c>app</c>). A global query
 /// filter isolates every <see cref="IUserOwned"/> entity by the current user (ADR-0001); the
-/// catalog is unfiltered. Implements the Application context ports so handlers stay provider-free.
+/// catalog foods/ingredients stay unfiltered, but <see cref="Recipe"/> is owner-scoped (a recipe is
+/// visible when it is global — no owner — or owned by the current user). Implements the Application
+/// context ports so handlers stay provider-free.
 /// </summary>
 /// <remarks>
 /// v1 uses a single operational context for delivery simplicity; the schema split keeps the
@@ -31,6 +33,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Domain.Catalog.Food> Foods => Set<Domain.Catalog.Food>();
     public DbSet<Portion> Portions => Set<Portion>();
     public DbSet<Recipe> Recipes => Set<Recipe>();
+    public DbSet<RecipeIngredient> RecipeIngredients => Set<RecipeIngredient>();
     public DbSet<Ingredient> Ingredients => Set<Ingredient>();
     public DbSet<DietType> DietTypes => Set<DietType>();
 
@@ -43,6 +46,9 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
+    public DbSet<Domain.Notifications.ChannelMessage> ChannelMessages => Set<Domain.Notifications.ChannelMessage>();
+    public DbSet<Domain.Notifications.ChannelSubscription> ChannelSubscriptions => Set<Domain.Notifications.ChannelSubscription>();
+    public DbSet<Domain.Notifications.AccountLinkToken> AccountLinkTokens => Set<Domain.Notifications.AccountLinkToken>();
 
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
@@ -102,6 +108,9 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(i => i.CanonicalName).HasMaxLength(200).IsRequired();
             e.Property(i => i.AisleCategory).HasMaxLength(50);
             e.HasIndex(i => i.CanonicalName);
+            // Raw↔cooked yield (#85): defaults backfill existing rows as "eaten as-is, stated raw".
+            e.Property(i => i.YieldFactor).HasDefaultValue(1.0);
+            e.Property(i => i.RecipeGramsAreRaw).HasDefaultValue(true);
         });
 
         b.Entity<Recipe>(e =>
@@ -109,9 +118,23 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.ToTable("recipes", "catalog");
             e.HasKey(r => r.Id);
             e.Property(r => r.Name).HasMaxLength(300).IsRequired();
+            e.Property(r => r.CookMethod).HasMaxLength(40);
+            e.Property(r => r.SourceUrl).HasMaxLength(2048);
+            e.Property(r => r.SourceType).HasMaxLength(20);
+            e.Property(r => r.SourceVideoId).HasMaxLength(20);
+            e.Property(r => r.ThumbnailUrl).HasMaxLength(2048);
             e.HasMany(r => r.Ingredients).WithOne().HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(r => r.Ingredients).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasIndex(r => r.IsNutritionComputed);
+            // Owner-scoped: null OwnerUserId = a GLOBAL (admin-curated) recipe; otherwise private to a user.
+            e.HasIndex(r => r.OwnerUserId);
+            // Dedup imported videos PER OWNER: one global copy AND one private copy per user are both
+            // allowed (each user can import the same video), but a given owner can't hold two of the same.
+            // Partial index ignores hand-authored recipes (null video id).
+            e.HasIndex(r => new { r.OwnerUserId, r.SourceVideoId }).IsUnique().HasFilter("\"SourceVideoId\" IS NOT NULL");
+            // Visibility: everyone reads global recipes (OwnerUserId IS NULL) plus their own. The catalog
+            // food/ingredient tables stay unfiltered; only recipes carry an owner.
+            e.HasQueryFilter(r => r.OwnerUserId == null || r.OwnerUserId == CurrentUserId);
         });
 
         b.Entity<RecipeIngredient>(e =>
@@ -220,8 +243,12 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(m => m.IntentJson).HasColumnType("jsonb");
             // Server default 1 backfills existing single-eater plans (additive, no behaviour change).
             e.Property(m => m.Eaters).HasDefaultValue(1);
+            // Day-block rotation; default 1 backfills existing plans as "a fresh meal-set every day".
+            e.Property(m => m.BlockSize).HasDefaultValue(1);
             e.HasMany(m => m.Slots).WithOne().HasForeignKey(s => s.MealPlanId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(m => m.Slots).UsePropertyAccessMode(PropertyAccessMode.Field);
+            e.HasMany(m => m.Members).WithOne().HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(m => m.Members).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasQueryFilter(m => m.UserId == CurrentUserId);
         });
 
@@ -231,6 +258,47 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(s => s.Id);
             e.Property(s => s.MealSlot).HasConversion<string>().HasMaxLength(20);
             e.Property(s => s.RecipeName).HasMaxLength(300);
+        });
+
+        // Owned via the filtered MealPlan navigation (no own query filter, no direct endpoint).
+        b.Entity<PlanMember>(e =>
+        {
+            e.ToTable("plan_members", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.Name).HasMaxLength(120).IsRequired();
+        });
+
+        b.Entity<Domain.Notifications.ChannelMessage>(e =>
+        {
+            e.ToTable("channel_messages", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.ChannelName).HasMaxLength(20);
+            e.Property(m => m.ChatId).HasMaxLength(64);
+            e.Property(m => m.Body).HasMaxLength(2000);
+            e.HasIndex(m => new { m.UserId, m.CreatedAt });
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        b.Entity<Domain.Notifications.ChannelSubscription>(e =>
+        {
+            e.ToTable("channel_subscriptions", "app");
+            e.HasKey(s => s.Id);
+            e.Property(s => s.Channel).HasMaxLength(20).IsRequired();
+            e.Property(s => s.Address).HasMaxLength(128);
+            // One subscription per channel per user.
+            e.HasIndex(s => new { s.UserId, s.Channel }).IsUnique();
+            e.HasQueryFilter(s => s.UserId == CurrentUserId);
+        });
+
+        b.Entity<Domain.Notifications.AccountLinkToken>(e =>
+        {
+            e.ToTable("account_link_tokens", "app");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Channel).HasMaxLength(20).IsRequired();
+            e.Property(t => t.TokenHash).HasMaxLength(64).IsRequired();
+            // Redeemed by hash lookup; unique so a hash collision can't shadow another user's link.
+            e.HasIndex(t => t.TokenHash).IsUnique();
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
         });
 
         // ---- Operational infra ----

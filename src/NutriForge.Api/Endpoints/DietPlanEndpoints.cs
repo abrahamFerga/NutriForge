@@ -52,6 +52,11 @@ public static class DietPlanEndpoints
             Results.Ok(await plans.AdherenceAsync(user.CurrentUserId(), id, ct)))
             .WithName("DietPlanAdherence");
 
+        // Parallel batch-cook guide: one cook session per day-block, raw quantities grouped by appliance.
+        group.MapGet("/{id:guid}/batch-cook", async (Guid id, ICurrentUser user, DietPlanService plans, CancellationToken ct) =>
+            await plans.GetBatchCookPlanAsync(user.CurrentUserId(), id, ct) is { } guide ? Results.Ok(guide) : Results.NotFound())
+            .WithName("DietPlanBatchCook");
+
         // Printable meal-prep sheet: per-person/day meals + the days×people consolidated shopping list.
         group.MapGet("/{id:guid}/pdf", async (Guid id, ICurrentUser user, DietPlanService plans, CancellationToken ct) =>
         {

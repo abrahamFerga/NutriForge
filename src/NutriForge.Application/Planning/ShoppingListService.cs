@@ -69,15 +69,19 @@ public sealed class ShoppingListService(IAppDbContext db, ICatalogDbContext cata
             var factor = reqLine.Servings / (recipe.Servings <= 0 ? 1 : recipe.Servings);
             foreach (var ri in recipe.Ingredients)
             {
+                var ing = ri.IngredientId is { } id && ingredients.TryGetValue(id, out var found) ? found : null;
                 var key = ri.IngredientId?.ToString() ?? ri.IngredientName.ToLowerInvariant();
                 if (!consolidated.TryGetValue(key, out var line))
                 {
-                    var aisle = ri.IngredientId is { } id && ingredients.TryGetValue(id, out var ing) ? ing.AisleCategory : "Other";
-                    line = new Line { IngredientId = ri.IngredientId, Name = ri.IngredientName, Aisle = aisle };
+                    line = new Line { IngredientId = ri.IngredientId, Name = ri.IngredientName, Aisle = ing?.AisleCategory ?? "Other" };
                     consolidated[key] = line;
                 }
 
-                line.Grams += ri.Grams * factor;
+                // Shop in RAW purchase weight: convert the recipe quantity (which may be stated as the
+                // cooked/plated weight, e.g. cooked rice) back to what you actually buy. Pantry stock below
+                // is likewise raw, so the subtraction stays apples-to-apples.
+                var scaled = ri.Grams * factor;
+                line.Grams += ing?.RawWeight(scaled) ?? scaled;
             }
         }
 

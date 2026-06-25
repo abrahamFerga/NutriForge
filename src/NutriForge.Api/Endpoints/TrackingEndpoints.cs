@@ -90,6 +90,52 @@ public static class TrackingEndpoints
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("ParseDiary");
+
+        // Photo logging: a meal photo → vision recognition → confirmable candidates (catalog-matched
+        // foods carry trusted numbers; off-catalog foods carry a flagged AI estimate). Nothing is
+        // logged until the user confirms via POST /diary. 503 when no vision provider is configured.
+        const long MaxImageBytes = 8 * 1024 * 1024;
+        group.MapPost("/parse-photo", async (HttpRequest request, ICurrentUser user, FoodPhotoService photos, IClock clock, CancellationToken ct) =>
+        {
+            if (!photos.IsConfigured)
+            {
+                return Results.Problem(title: "Photo recognition unavailable",
+                    detail: "No vision provider is configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (!request.HasFormContentType)
+            {
+                return Results.Problem(title: "Invalid request", detail: "Send the image as multipart/form-data.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var form = await request.ReadFormAsync(ct);
+            var file = form.Files.GetFile("image") ?? (form.Files.Count > 0 ? form.Files[0] : null);
+            if (file is null || file.Length == 0)
+            {
+                return Results.Problem(title: "No image", detail: "Attach a meal photo as the 'image' field.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            if (file.Length > MaxImageBytes)
+            {
+                return Results.Problem(title: "Image too large", detail: "Max image size is 8 MB.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+
+            var mealSlot = Enum.TryParse<MealSlot>(form["mealSlot"], ignoreCase: true, out var slot) ? slot : MealSlot.Snack;
+            var date = DateOnly.TryParse(form["date"], out var d) ? d : clock.Today;
+
+            var result = await photos.AnalyzeAsync(
+                user.CurrentUserId(), ms.ToArray(), file.ContentType ?? "image/jpeg", mealSlot, date, ct);
+            return Results.Ok(result);
+        })
+            .RequireRateLimiting(RateLimitPolicies.Expensive)
+            .DisableAntiforgery()
+            .WithName("ParseDiaryPhoto");
     }
 
     /// <summary>Free-text meal description to parse into confirmable diary candidates.</summary>

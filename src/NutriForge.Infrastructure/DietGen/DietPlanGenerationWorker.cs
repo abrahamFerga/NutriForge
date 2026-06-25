@@ -102,7 +102,11 @@ public sealed partial class DietPlanGenerationWorker(
                 ? null
                 : await db.DietTypes.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Slug == intent.DietSlug, ct).ConfigureAwait(false);
 
-            var pool = RecipeFilter.Filter(recipes, intent, diet);
+            // The batch pool was loaded with IgnoreQueryFilters (system context — every user's recipes), so
+            // scope it to THIS plan's owner before selecting: global recipes (no owner) plus the plan
+            // owner's own. Without this a user's private recipe could leak into another user's plan.
+            var visible = recipes.Where(r => r.OwnerUserId is null || r.OwnerUserId == plan.UserId).ToList();
+            var pool = RecipeFilter.Filter(visible, intent, diet);
             var result = generator.Generate(pool, intent, plan.TargetKcal);
 
             plan.ClearSlots();

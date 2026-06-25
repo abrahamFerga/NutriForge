@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NutriForge.AppHost\NutriForge.AppHost.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\src\NutriForge.Api\NutriForge.Api.csproj" />
   </ItemGroup>
 
 </Project>

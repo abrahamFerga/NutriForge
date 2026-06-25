@@ -234,8 +234,11 @@ locals {
       { name = "KeyVault__Uri", value = azurerm_key_vault.main.vault_uri },
     ],
     var.enable_postgres ? [
-      { name = "ConnectionStrings__Default", value = "Host=${local.pg_host};Database=appdb;Username=${azurerm_user_assigned_identity.app.client_id};SSL Mode=Require;Trust Server Certificate=true" },
-      { name = "ConnectionStrings__Audit", value = "Host=${local.pg_host};Database=auditdb;Username=${azurerm_user_assigned_identity.app.client_id};SSL Mode=Require;Trust Server Certificate=true" },
+      # The env-var NAMES must match the connection names the app resolves: appdb/auditdb (the Aspire
+      # resource names from AppHost.cs, read via GetConnectionString in DependencyInjection.cs). Aspire
+      # surfaces them locally as ConnectionStrings__appdb/__auditdb; ACA must inject the SAME keys.
+      { name = "ConnectionStrings__appdb", value = "Host=${local.pg_host};Database=appdb;Username=${azurerm_user_assigned_identity.app.client_id};SSL Mode=Require;Trust Server Certificate=true" },
+      { name = "ConnectionStrings__auditdb", value = "Host=${local.pg_host};Database=auditdb;Username=${azurerm_user_assigned_identity.app.client_id};SSL Mode=Require;Trust Server Certificate=true" },
     ] : []
   )
 }
@@ -292,8 +295,11 @@ resource "azurerm_container_app" "api" {
           value = env.value.value
         }
       }
+      # The app's Redis client is registered as AddRedisClient("cache"), which reads
+      # ConnectionStrings__cache. The VALUE is the Key Vault-referenced ACA secret (resolved by the
+      # UAMI); only the env-var NAME has to match the "cache" Aspire resource name.
       env {
-        name        = "ConnectionStrings__Redis"
+        name        = "ConnectionStrings__cache"
         secret_name = "redis-connection"
       }
     }
@@ -353,8 +359,11 @@ resource "azurerm_container_app_job" "import" {
           value = env.value.value
         }
       }
+      # The app's Redis client is registered as AddRedisClient("cache"), which reads
+      # ConnectionStrings__cache. The VALUE is the Key Vault-referenced ACA secret (resolved by the
+      # UAMI); only the env-var NAME has to match the "cache" Aspire resource name.
       env {
-        name        = "ConnectionStrings__Redis"
+        name        = "ConnectionStrings__cache"
         secret_name = "redis-connection"
       }
     }
