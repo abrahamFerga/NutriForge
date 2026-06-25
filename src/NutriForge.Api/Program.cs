@@ -103,6 +103,7 @@ app.MapRecipeEndpoints();
 app.MapPlanningEndpoints();
 app.MapDietPlanEndpoints();
 app.MapNotificationEndpoints();
+app.MapWhatsAppInboundEndpoints();
 
 await app.InitializeDatabaseAsync();
 

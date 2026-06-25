@@ -43,6 +43,7 @@ public static class DependencyInjection
         // Redis (Aspire client integration) + the food-search cache over it.
         builder.AddRedisClient("cache");
         services.AddSingleton<IFoodSearchCache, RedisFoodSearchCache>();
+        services.AddSingleton<IWhatsAppPendingStore, Notifications.RedisWhatsAppPendingStore>();
 
         // The OR-Tools LP portion optimizer (REPAIR) — a dependency of the generator, used by both
         // the synchronous API path and the background generation worker, so it lives here.

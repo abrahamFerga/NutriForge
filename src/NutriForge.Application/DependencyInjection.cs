@@ -40,6 +40,7 @@ public static class DependencyInjection
         services.AddScoped<Notifications.WeeklySummaryService>();
         services.AddScoped<Notifications.LogReminderService>();
         services.AddScoped<Notifications.ChannelSubscriptionService>();
+        services.AddScoped<Notifications.WhatsAppInboundService>();
 
         services.AddValidatorsFromAssemblyContaining<SubmitFoodRequestValidator>(ServiceLifetime.Singleton);
 
