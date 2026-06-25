@@ -146,6 +146,11 @@ resource "azurerm_postgresql_flexible_server" "main" {
     tenant_id                     = data.azurerm_client_config.current.tenant_id
   }
 
+  # Backup & PITR: retention window determines how far back we can restore.
+  # Set to 7d for dev/test (minimum), 35d for prod in the env tfvars.
+  backup_retention_days        = var.postgres_backup_retention_days
+  geo_redundant_backup_enabled = var.postgres_geo_redundant_backup
+
   tags = local.tags
 }
 

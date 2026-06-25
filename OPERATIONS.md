@@ -136,7 +136,14 @@ schema change, restore from a PITR snapshot (§5) rather than attempting a manua
 
 ## 5. Postgres restore drill
 
-Run this drill quarterly to confirm backup health.
+The drill is automated: `.github/workflows/pitr-restore-drill.yml` runs quarterly
+(08:00 UTC on 1 Jan/Apr/Jul/Oct) and can also be triggered manually from the Actions
+tab. It creates a PITR restore server, verifies connectivity with `pg_isready`, then
+deletes the drill server. Required GitHub secrets: `AZURE_SUBSCRIPTION_ID`,
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`. Required repository variables: `PG_RESOURCE_GROUP`,
+`PG_SERVER_NAME`. Optional: `PAGERDUTY_ROUTING_KEY` for failure alerting.
+
+Run the manual steps below only if the automated drill fails or for ad-hoc investigation.
 
 ### 5.1 Verify backups exist
 ```bash
