@@ -34,8 +34,15 @@ public sealed class DietPlanService(
 
         var kcalTarget = req.KcalTarget ?? target?.Kcal ?? 2000;
         var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var k in (req.ExcludeAllergens ?? []).Concat(req.Dislikes ?? [])
-            .Concat(profile?.Allergens ?? []).Concat(profile?.Dislikes ?? []))
+        // Allergens are safety-critical → expand through the ontology so derivatives (milk→butter/cheese/
+        // whey, nuts→almond/cashew, …) are caught too, not just the literal word (#60).
+        foreach (var k in AllergenOntology.Expand((req.ExcludeAllergens ?? []).Concat(profile?.Allergens ?? [])))
+        {
+            exclude.Add(k);
+        }
+
+        // Dislikes are a preference, not a safety constraint → excluded literally only.
+        foreach (var k in (req.Dislikes ?? []).Concat(profile?.Dislikes ?? []))
         {
             if (!string.IsNullOrWhiteSpace(k))
             {
