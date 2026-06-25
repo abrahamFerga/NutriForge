@@ -159,3 +159,16 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# --- Monitoring & alerting (#51) --------------------------------------------- #
+variable "oncall_webhook_url" {
+  description = "Webhook URL for the critical SLO action group (PagerDuty Events API v2, OpsGenie, etc.)."
+  type        = string
+  default     = "https://example.com/placeholder" # override in tfvars or via TF_VAR_oncall_webhook_url
+}
+
+variable "engineering_email" {
+  description = "Email address for SLO warning alerts (ticket creation)."
+  type        = string
+  default     = "engineering@example.com"
+}

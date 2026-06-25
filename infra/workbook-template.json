@@ -1,0 +1,207 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# NutriForge Operations Dashboard\n\nReal-time view of API health, SLO status, and product KPIs.\n\n**Application Insights**: `${app_insights_name}`  \n**Subscription**: `${subscription_id}`"
+      },
+      "name": "header"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "time-range",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "type": 4,
+            "value": { "durationMs": 3600000 },
+            "typeSettings": { "selectableValues": [
+              { "durationMs": 300000 },
+              { "durationMs": 900000 },
+              { "durationMs": 3600000 },
+              { "durationMs": 86400000 },
+              { "durationMs": 604800000 }
+            ]}
+          }
+        ]
+      },
+      "name": "time-range-param"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## API Health" },
+      "name": "section-api"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where timestamp {TimeRange}\n| summarize total=count(), errors=countif(resultCode startswith '5'), latency_p99=percentile(duration, 99), latency_p50=percentile(duration, 50) by bin(timestamp, 5m)\n| extend availability=round((total - errors) * 100.0 / total, 2)\n| project-rename ['Time']=timestamp, ['Total req']=total, ['5xx']=errors, ['Avail %']=availability, ['p50 (ms)']=latency_p50, ['p99 (ms)']=latency_p99",
+        "size": 0,
+        "title": "Request rate, availability & latency",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "crossComponentResources": ["${app_insights_id}"],
+        "visualization": "linechart",
+        "chartSettings": {
+          "seriesLabelSettings": [
+            { "seriesName": "Avail %", "color": "green" },
+            { "seriesName": "p99 (ms)", "color": "orange" }
+          ]
+        }
+      },
+      "name": "api-health-chart"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where timestamp {TimeRange}\n| summarize total=count(), errors=countif(resultCode startswith '5')\n| extend availability=round((total - errors) * 100.0 / total, 3)\n| project ['Requests']=total, ['5xx errors']=errors, ['Availability %']=availability",
+        "size": 4,
+        "title": "28-day availability snapshot",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "crossComponentResources": ["${app_insights_id}"],
+        "visualization": "tiles",
+        "tileSettings": {
+          "showBorder": true,
+          "titleContent": { "columnMatch": "Column", "formatter": 1 },
+          "leftContent": { "columnMatch": "Value", "formatter": 12 }
+        }
+      },
+      "name": "availability-tiles"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## Endpoint Latency" },
+      "name": "section-latency"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where timestamp {TimeRange}\n| where url !has '/diet-plan/generate' and url !has '/assistant/'\n| summarize p50=percentile(duration, 50), p95=percentile(duration, 95), p99=percentile(duration, 99), rps=count() by bin(timestamp, 5m)\n| project-rename ['Time']=timestamp, ['p50 ms']=p50, ['p95 ms']=p95, ['p99 ms']=p99, ['req/5m']=rps",
+        "size": 0,
+        "title": "Non-AI endpoint latency (p50 / p95 / p99)",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "crossComponentResources": ["${app_insights_id}"],
+        "visualization": "linechart"
+      },
+      "name": "latency-chart"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "requests\n| where timestamp {TimeRange}\n| where url !has '/diet-plan/generate' and url !has '/assistant/'\n| summarize p99=percentile(duration, 99) by name\n| top 10 by p99 desc\n| project-rename ['Endpoint']=name, ['p99 (ms)']=p99",
+        "size": 0,
+        "title": "Slowest endpoints (p99)",
+        "queryType": 0,
+        "resourceType": "microsoft.insights/components",
+        "crossComponentResources": ["${app_insights_id}"],
+        "visualization": "table"
+      },
+      "name": "slowest-endpoints"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## Product KPIs" },
+      "name": "section-kpis"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name in ('nutriforge.diary.entries_logged', 'nutriforge.shopping_list.created', 'nutriforge.plan.generated')\n| summarize total=sum(value) by name, bin(timestamp, 1h)\n| project-rename ['Time']=timestamp, ['Metric']=name, ['Count']=total",
+        "size": 0,
+        "title": "Product KPI events per hour",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["${log_workspace_id}"],
+        "visualization": "linechart"
+      },
+      "name": "kpi-events"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'nutriforge.plan.generation_duration'\n| summarize p50=percentile(value, 50), p95=percentile(value, 95), p99=percentile(value, 99) by bin(timestamp, 30m)\n| project-rename ['Time']=timestamp, ['p50 (s)']=p50, ['p95 (s)']=p95, ['p99 (s)']=p99",
+        "size": 0,
+        "title": "Diet plan generation latency (s)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["${log_workspace_id}"],
+        "visualization": "linechart"
+      },
+      "name": "plan-latency"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'nutriforge.plan.generated'\n| summarize\n    total    = sum(value),\n    feasible = sumif(value, tostring(customDimensions.feasible) == 'true')\n  by bin(timestamp, 1h)\n| extend feasibility_pct = round(feasible * 100.0 / total, 1)\n| project-rename ['Time']=timestamp, ['Total plans']=total, ['Feasible %']=feasibility_pct",
+        "size": 0,
+        "title": "Plan feasibility rate %",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["${log_workspace_id}"],
+        "visualization": "linechart"
+      },
+      "name": "plan-feasibility"
+    },
+    {
+      "type": 1,
+      "content": { "json": "## AI Assistant" },
+      "name": "section-ai"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'nutriforge.ai.turns'\n| summarize\n    ok          = sumif(value, tostring(customDimensions.outcome) == 'ok'),\n    budget_exc  = sumif(value, tostring(customDimensions.outcome) == 'budget_exceeded'),\n    injection   = sumif(value, tostring(customDimensions.outcome) == 'injection')\n  by bin(timestamp, 1h)\n| project-rename ['Time']=timestamp, ['OK']=ok, ['Budget exceeded']=budget_exc, ['Injections blocked']=injection",
+        "size": 0,
+        "title": "Assistant turns by outcome",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["${log_workspace_id}"],
+        "visualization": "barchart"
+      },
+      "name": "ai-turns"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'nutriforge.ai.tokens_used'\n| summarize total_tokens=sum(value) by tostring(customDimensions.type), bin(timestamp, 1h)\n| project-rename ['Time']=timestamp, ['Token type']=customDimensions_type, ['Tokens']=total_tokens",
+        "size": 0,
+        "title": "AI token consumption (input vs output)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["${log_workspace_id}"],
+        "visualization": "barchart"
+      },
+      "name": "ai-tokens"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where timestamp {TimeRange}\n| where name == 'nutriforge.ai.request_duration'\n| summarize p50=percentile(value, 50), p95=percentile(value, 95), p99=percentile(value, 99) by bin(timestamp, 30m)\n| project-rename ['Time']=timestamp, ['p50 (s)']=p50, ['p95 (s)']=p95, ['p99 (s)']=p99",
+        "size": 0,
+        "title": "Assistant turn duration (s)",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": ["${log_workspace_id}"],
+        "visualization": "linechart"
+      },
+      "name": "ai-duration"
+    }
+  ],
+  "$schema": "https://github.com/Microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
