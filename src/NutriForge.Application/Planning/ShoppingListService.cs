@@ -16,7 +16,7 @@ public sealed record ShoppingListDto(Guid Id, Guid? MealPlanId, IReadOnlyList<Sh
 /// canonical ingredient → subtract pantry stock → group by aisle. The part most meal-prep apps
 /// get wrong, and the closed loop's endpoint from an accepted plan.
 /// </summary>
-public sealed class ShoppingListService(IAppDbContext db, ICatalogDbContext catalog)
+public sealed class ShoppingListService(IAppDbContext db, ICatalogDbContext catalog, Observability.NutriForgeMetrics? metrics = null)
 {
     private sealed class Line
     {
@@ -32,6 +32,7 @@ public sealed class ShoppingListService(IAppDbContext db, ICatalogDbContext cata
         var list = await BuildAsync(userId, lines, mealPlanId, ct).ConfigureAwait(false);
         db.ShoppingLists.Add(list);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        metrics?.ShoppingListCreated(fromPlan: mealPlanId is not null); // #50 — loop-completion signal
         return ToDto(list);
     }
 

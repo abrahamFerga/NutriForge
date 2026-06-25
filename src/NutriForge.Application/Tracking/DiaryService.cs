@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NutriForge.Application.Abstractions;
+using NutriForge.Application.Observability;
 using NutriForge.Domain.Common;
 using NutriForge.Domain.Diary;
 
@@ -16,13 +17,15 @@ public sealed class FoodNotFoundException(Guid foodId)
 /// The daily diary. Each entry snapshots its nutrition at log time (ADR-0006) so past days are
 /// immutable. Reads roll the day up against the user's cached target.
 /// </summary>
-public sealed class DiaryService(IAppDbContext db, ICatalogDbContext catalog, TargetService targets)
+public sealed class DiaryService(IAppDbContext db, ICatalogDbContext catalog, TargetService targets, NutriForgeMetrics? metrics = null)
 {
     public async Task<DiaryEntryDto> AddAsync(Guid userId, AddDiaryEntryRequest req, CancellationToken ct = default)
     {
         var entry = await BuildEntryAsync(userId, req, ct).ConfigureAwait(false);
         db.DiaryEntries.Add(entry);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        // #50 — day-1 activation + logging-friction telemetry.
+        metrics?.DiaryEntryLogged(req.MealSlot.ToString(), req.Method, req.ElapsedSeconds);
         return entry.ToDto();
     }
 

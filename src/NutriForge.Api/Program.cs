@@ -1,4 +1,6 @@
 using System.Text.Json.Serialization;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
 using NutriForge.Api.Auth;
 using NutriForge.Api.Endpoints;
 using NutriForge.Api.Middleware;
@@ -20,6 +22,9 @@ builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 // OpenTelemetry + health checks + service discovery + HTTP resilience.
 builder.AddServiceDefaults();
+
+// Export the product-KPI meter (#50) so the dashboards/alerts can read the SPEC success metrics.
+builder.Services.ConfigureOpenTelemetryMeterProvider(m => m.AddMeter(NutriForge.Application.Observability.NutriForgeMetrics.MeterName));
 
 // Persistence, caching, audit-outbox, clock (Aspire-wired Postgres + Redis).
 builder.AddInfrastructure();

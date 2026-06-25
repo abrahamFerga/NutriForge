@@ -8,7 +8,11 @@ public sealed record AddDiaryEntryRequest(
     MealSlot MealSlot,
     Guid FoodId,
     Guid? PortionId,
-    double Quantity);
+    double Quantity,
+    // Telemetry only (#50): how the entry was logged (search/barcode/quick_add/…) and, when the client
+    // measures it, the seconds from opening the logger to saving. Never affects the snapshot.
+    string? Method = null,
+    double? ElapsedSeconds = null);
 
 public sealed record DiaryEntryDto(
     Guid Id,

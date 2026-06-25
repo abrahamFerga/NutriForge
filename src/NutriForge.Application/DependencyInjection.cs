@@ -11,6 +11,9 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        // Product telemetry for the SPEC success metrics (#50) — one shared Meter for the whole app.
+        services.AddSingleton<Observability.NutriForgeMetrics>();
+
         services.AddScoped<FoodService>();
         services.AddScoped<BarcodeService>();
         services.AddScoped<ProfileService>();

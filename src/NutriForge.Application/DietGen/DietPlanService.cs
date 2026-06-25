@@ -20,7 +20,8 @@ public sealed class DietPlanService(
     IDietIntentParser parser,
     DietPlanGenerator generator,
     ShoppingListService shopping,
-    IClock clock)
+    IClock clock,
+    Observability.NutriForgeMetrics? metrics = null)
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -92,6 +93,8 @@ public sealed class DietPlanService(
     /// <summary>Run FILTER → SELECT → VERIFY → REPAIR over the catalog pool and finish the plan.</summary>
     private async Task FinishGenerationAsync(MealPlan plan, DietIntent intent, CancellationToken ct)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew(); // #50 — p95 plan-latency SLO
+
         // Order by Id so the greedy round-robin pool is stable: same inputs ⇒ same plan (deterministic
         // generation, independent of DB heap order). Eaters never enters here.
         var recipes = await catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
@@ -124,6 +127,14 @@ public sealed class DietPlanService(
         plan.AchievedProteinG = result.DailyAverage.ProteinG;
         plan.AchievedFatG = result.DailyAverage.FatG;
         plan.AchievedCarbG = result.DailyAverage.CarbG;
+
+        // #50 — plan correctness + latency. within_target mirrors the VERIFY tolerance; allergens_honored
+        // re-asserts the gate over the final slots (the spec's "100% honor declared allergens").
+        sw.Stop();
+        var deviationPct = plan.TargetKcal > 0 ? (result.DailyAverage.Kcal - plan.TargetKcal) / plan.TargetKcal * 100.0 : 0;
+        var withinTarget = result.Feasible && Math.Abs(deviationPct) <= PlanVerifier.KcalTolerancePct * 100.0;
+        var allergensHonored = PlanVerifier.AllergensClear(result.Slots, intent.ExcludeKeywords);
+        metrics?.PlanGenerated(result.Feasible, withinTarget, allergensHonored, deviationPct, sw.Elapsed.TotalSeconds);
     }
 
     public async Task<DietPlanDto?> GetAsync(Guid userId, Guid id, CancellationToken ct = default)
