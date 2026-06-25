@@ -678,6 +678,52 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json)).GetArrayLength());
     }
 
+    /// <summary>Hydration (#72): accumulate water, undo, set a goal — against real Postgres.</summary>
+    [Fact]
+    public async Task Hydration_accumulates_and_tracks_a_goal()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"hydro-{Guid.NewGuid():N}");
+
+        // Fresh user: zero ml at the default goal.
+        var start = await client.GetFromJsonAsync<JsonElement>("/api/v1/hydration", Json);
+        Assert.Equal(0, start.GetProperty("ml").GetInt32());
+        Assert.Equal(2500, start.GetProperty("goalMl").GetInt32());
+
+        // Add 250 + 500 → 750.
+        await PostHydration(client, "/api/v1/hydration", new { ml = 250 });
+        var after = await PostHydration(client, "/api/v1/hydration", new { ml = 500 });
+        Assert.Equal(750, after.GetProperty("ml").GetInt32());
+
+        // Set a goal → it sticks and is reflected in GET.
+        using (var goal = new HttpRequestMessage(HttpMethod.Put, "/api/v1/hydration/goal")
+        {
+            Content = JsonContent.Create(new { goalMl = 3000 }, options: Json),
+        })
+        {
+            goal.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(goal);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(3000, (await r.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("goalMl").GetInt32());
+        }
+
+        var now = await client.GetFromJsonAsync<JsonElement>("/api/v1/hydration", Json);
+        Assert.Equal(750, now.GetProperty("ml").GetInt32());
+        Assert.Equal(3000, now.GetProperty("goalMl").GetInt32());
+
+        // A big undo clamps at zero.
+        var cleared = await PostHydration(client, "/api/v1/hydration", new { ml = -5000 });
+        Assert.Equal(0, cleared.GetProperty("ml").GetInt32());
+    }
+
+    private static async Task<JsonElement> PostHydration(HttpClient client, string path, object body)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) };
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using var r = await client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        return await r.Content.ReadFromJsonAsync<JsonElement>(Json);
+    }
+
     /// <summary>Meal templates (#70): create a saved meal, log it in one tap, then delete it.</summary>
     [Fact]
     public async Task Meal_template_saves_a_combination_of_foods_and_logs_it_in_one_tap()

@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
 import { MacroBar } from "@/components/MacroBar";
 import { WeightCard } from "@/components/WeightCard";
+import { HydrationCard } from "@/components/HydrationCard";
 import {
   EmptyState,
   ErrorState,
@@ -176,7 +177,10 @@ export function Dashboard() {
         </CardContent>
       </Card>
 
-      <WeightCard />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <WeightCard />
+        <HydrationCard />
+      </div>
     </div>
   );
 }

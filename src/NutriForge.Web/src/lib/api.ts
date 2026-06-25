@@ -18,6 +18,7 @@ import type {
   DietPlanDto,
   FoodDetail,
   FoodSummary,
+  HydrationDay,
   ImportPreviewDto,
   ImportRecipeRequest,
   LogMeasurementRequest,
@@ -499,6 +500,26 @@ export const measurementsApi = {
     return request<void>(`/api/v1/measurements/${encodeURIComponent(date)}`, {
       method: "DELETE",
     });
+  },
+};
+
+// ---- Hydration (#72) ----
+
+export const hydrationApi = {
+  /** Today's (or a given date's) intake + goal. */
+  get(date?: string): Promise<HydrationDay> {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+    return request<HydrationDay>(`/api/v1/hydration${qs}`);
+  },
+  history(days = 30): Promise<HydrationDay[]> {
+    return request<HydrationDay[]>(`/api/v1/hydration/history?days=${days}`);
+  },
+  /** Add water (a negative amount undoes). Returns the updated day. */
+  add(ml: number): Promise<HydrationDay> {
+    return request<HydrationDay>("/api/v1/hydration", { method: "POST", body: { ml } });
+  },
+  setGoal(goalMl: number): Promise<HydrationDay> {
+    return request<HydrationDay>("/api/v1/hydration/goal", { method: "PUT", body: { goalMl } });
   },
 };
 

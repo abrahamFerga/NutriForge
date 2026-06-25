@@ -44,6 +44,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Target> Targets => Set<Target>();
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
     public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
+    public DbSet<HydrationDay> HydrationDays => Set<HydrationDay>();
     public DbSet<FavoriteFood> FavoriteFoods => Set<FavoriteFood>();
     public DbSet<MealTemplate> MealTemplates => Set<MealTemplate>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
@@ -212,6 +213,15 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(m => m.Id);
             e.HasIndex(m => new { m.UserId, m.Date }).IsUnique(); // one entry per day per user
             e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        // Hydration (#72): one running-total row per (user, day).
+        b.Entity<HydrationDay>(e =>
+        {
+            e.ToTable("hydration_days", "app");
+            e.HasKey(h => h.Id);
+            e.HasIndex(h => new { h.UserId, h.Date }).IsUnique();
+            e.HasQueryFilter(h => h.UserId == CurrentUserId);
         });
 
         b.Entity<FavoriteFood>(e =>

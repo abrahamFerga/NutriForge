@@ -16,9 +16,50 @@ public static class TrackingEndpoints
         MapTargets(app);
         MapDiary(app);
         MapMeasurements(app);
+        MapHydration(app);
         MapFavorites(app);
         MapMealTemplates(app);
         return app;
+    }
+
+    private static void MapHydration(IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/v1/hydration")
+            .RequireAuthorization(Policies.OwnerOnly).WithTags("Hydration");
+
+        // Today's (or a given date's) intake + goal.
+        group.MapGet("/", async (DateOnly? date, ICurrentUser user, HydrationService hydration, CancellationToken ct) =>
+            Results.Ok(await hydration.GetDayAsync(user.CurrentUserId(), date, ct)))
+            .WithName("GetHydration");
+
+        // Recent history (default ~30 days), oldest-first.
+        group.MapGet("/history", async (int? days, ICurrentUser user, HydrationService hydration, CancellationToken ct) =>
+            Results.Ok(await hydration.HistoryAsync(user.CurrentUserId(), days ?? 30, ct)))
+            .WithName("GetHydrationHistory");
+
+        // Add water (a negative amount undoes); clamped at zero.
+        group.MapPost("/", async (LogHydrationRequest req, ICurrentUser user, HydrationService hydration, CancellationToken ct) =>
+        {
+            if (req is null || req.Ml == 0 || req.Ml is < -5000 or > 5000)
+            {
+                return Results.Problem(title: "Invalid amount", detail: "Amount must be a non-zero value within ±5000 ml.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(await hydration.LogAsync(user.CurrentUserId(), req, ct));
+        }).WithName("LogHydration");
+
+        // Set the daily goal.
+        group.MapPut("/goal", async (SetHydrationGoalRequest req, ICurrentUser user, HydrationService hydration, CancellationToken ct) =>
+        {
+            if (req is null || req.GoalMl <= 0)
+            {
+                return Results.Problem(title: "Invalid goal", detail: "Goal must be a positive number of millilitres.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            return Results.Ok(await hydration.SetGoalAsync(user.CurrentUserId(), req, ct));
+        }).WithName("SetHydrationGoal");
     }
 
     private static void MapMealTemplates(IEndpointRouteBuilder app)

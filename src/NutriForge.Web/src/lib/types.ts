@@ -242,6 +242,14 @@ export interface LogMeasurementRequest {
   waistCm?: number | null;
 }
 
+// ---- Hydration (#72) ----
+
+export interface HydrationDay {
+  date: string; // yyyy-MM-dd
+  ml: number;
+  goalMl: number;
+}
+
 // ---- Natural-language parse ----
 
 /**
