@@ -46,6 +46,9 @@ public static class DependencyInjection
         // the synchronous API path and the background generation worker, so it lives here.
         services.AddSingleton<Application.DietGen.IPortionOptimizer, DietGen.OrToolsPortionOptimizer>();
 
+        // USDA FoodData Central importer (#19) — idempotent catalog upsert; driven by the import worker.
+        services.AddScoped<UsdaFdc.UsdaFdcImporter>();
+
         return builder;
     }
 
