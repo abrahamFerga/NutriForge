@@ -1,0 +1,32 @@
+name: Dependency review
+
+# Block PRs that introduce NuGet or npm packages with known vulnerabilities or
+# that change the license set in a disallowed way. Fires on every PR to main.
+#
+# Requires the repo to have "Dependency graph" enabled (Settings → Security).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Fail on HIGH and CRITICAL severity vulnerabilities.
+          fail-on-severity: high
+          # Only flag licenses that are genuinely incompatible with the project.
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          # Leave a PR comment summarising any findings (works on write permission above).
+          comment-summary-in-pr: always

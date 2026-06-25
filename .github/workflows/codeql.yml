@@ -1,0 +1,64 @@
+name: CodeQL
+
+# Static analysis: security vulnerabilities in C# (API + application layer) and
+# JavaScript/TypeScript (the Vite SPA). Runs on every push to main and on PRs that
+# change C# or TS/TSX source, and on a weekly schedule so new CVE signatures fire
+# even when the repo is quiet.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**/*.cs"
+      - "src/NutriForge.Web/src/**/*.ts"
+      - "src/NutriForge.Web/src/**/*.tsx"
+  schedule:
+    # 02:17 UTC every Monday — off-peak to avoid runner contention.
+    - cron: "17 2 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: csharp
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Use the "security-and-quality" query suite for the hardened set.
+          queries: security-and-quality
+
+      # C# requires a real build so CodeQL can trace the compilation.
+      - name: Setup .NET (C# only)
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build .NET solution (C# only)
+        if: matrix.language == 'csharp'
+        run: dotnet build --configuration Release --no-restore || dotnet restore && dotnet build --configuration Release
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
