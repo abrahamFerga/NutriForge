@@ -678,6 +678,54 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json)).GetArrayLength());
     }
 
+    /// <summary>Consent (#58): capture, withdraw, and surface it in the GDPR export — against real Postgres.</summary>
+    [Fact]
+    public async Task Consent_is_captured_withdrawn_and_surfaced_in_the_export()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"consent-{Guid.NewGuid():N}");
+
+        // Fresh user: required consents need action, marketing does not.
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/v1/me/consent", Json);
+        Assert.Contains(initial.EnumerateArray(), c =>
+            c.GetProperty("type").GetString() == "PrivacyPolicy" && c.GetProperty("needsAction").GetBoolean());
+        Assert.Contains(initial.EnumerateArray(), c =>
+            c.GetProperty("type").GetString() == "Marketing" && !c.GetProperty("needsAction").GetBoolean());
+
+        // Grant the three required consents.
+        foreach (var type in new[] { "TermsOfService", "PrivacyPolicy", "HealthDataProcessing" })
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me/consent")
+            {
+                Content = JsonContent.Create(new { type, granted = true }, options: Json),
+            };
+            req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        var afterGrant = await client.GetFromJsonAsync<JsonElement>("/api/v1/me/consent", Json);
+        Assert.DoesNotContain(afterGrant.EnumerateArray(), c => c.GetProperty("needsAction").GetBoolean());
+
+        // Withdraw one → it reopens.
+        using (var withdraw = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me/consent/PrivacyPolicy/withdraw"))
+        {
+            withdraw.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(withdraw);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            var status = await r.Content.ReadFromJsonAsync<JsonElement>(Json);
+            Assert.Contains(status.EnumerateArray(), c =>
+                c.GetProperty("type").GetString() == "PrivacyPolicy"
+                && !c.GetProperty("granted").GetBoolean()
+                && c.GetProperty("needsAction").GetBoolean());
+        }
+
+        // The full trail (grant + withdraw for PrivacyPolicy = 2 rows) rides the Art. 20 export.
+        var export = await client.GetFromJsonAsync<JsonElement>("/api/v1/me/export", Json);
+        var consent = export.GetProperty("consent").EnumerateArray().ToList();
+        Assert.Equal(2, consent.Count(c => c.GetProperty("type").GetString() == "PrivacyPolicy"));
+        Assert.Contains(consent, c => c.GetProperty("lawfulBasis").GetString() == "Contract"); // ToS
+    }
+
     /// <summary>Hydration (#72): accumulate water, undo, set a goal — against real Postgres.</summary>
     [Fact]
     public async Task Hydration_accumulates_and_tracks_a_goal()

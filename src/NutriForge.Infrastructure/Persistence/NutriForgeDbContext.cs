@@ -45,6 +45,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
     public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
     public DbSet<HydrationDay> HydrationDays => Set<HydrationDay>();
+    public DbSet<Domain.Consent.ConsentRecord> ConsentRecords => Set<Domain.Consent.ConsentRecord>();
     public DbSet<FavoriteFood> FavoriteFoods => Set<FavoriteFood>();
     public DbSet<MealTemplate> MealTemplates => Set<MealTemplate>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
@@ -222,6 +223,18 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(h => h.Id);
             e.HasIndex(h => new { h.UserId, h.Date }).IsUnique();
             e.HasQueryFilter(h => h.UserId == CurrentUserId);
+        });
+
+        // Consent trail (#58): append-only grant/withdraw decisions, enums stored as strings.
+        b.Entity<Domain.Consent.ConsentRecord>(e =>
+        {
+            e.ToTable("consent_records", "app");
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Type).HasConversion<string>().HasMaxLength(40);
+            e.Property(r => r.LawfulBasis).HasConversion<string>().HasMaxLength(30);
+            e.Property(r => r.PolicyVersion).HasMaxLength(20);
+            e.HasIndex(r => new { r.UserId, r.Type, r.RecordedAt });
+            e.HasQueryFilter(r => r.UserId == CurrentUserId);
         });
 
         b.Entity<FavoriteFood>(e =>

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NutriForge.Domain.Assistant;
+using NutriForge.Domain.Consent;
 using NutriForge.Domain.Diary;
 using NutriForge.Domain.Notifications;
 using NutriForge.Domain.Planning;
@@ -19,6 +20,7 @@ public interface IAppDbContext
     DbSet<DiaryEntry> DiaryEntries { get; }
     DbSet<BodyMeasurement> BodyMeasurements { get; }
     DbSet<HydrationDay> HydrationDays { get; }
+    DbSet<ConsentRecord> ConsentRecords { get; }
     DbSet<FavoriteFood> FavoriteFoods { get; }
     DbSet<MealTemplate> MealTemplates { get; }
     DbSet<AssistantSession> AssistantSessions { get; }

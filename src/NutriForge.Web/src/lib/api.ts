@@ -16,6 +16,8 @@ import type {
   DiaryEntry,
   DiaryParseResult,
   DietPlanDto,
+  ConsentStatus,
+  ConsentType,
   FoodDetail,
   FoodSummary,
   HydrationDay,
@@ -500,6 +502,26 @@ export const measurementsApi = {
     return request<void>(`/api/v1/measurements/${encodeURIComponent(date)}`, {
       method: "DELETE",
     });
+  },
+};
+
+// ---- Consent / GDPR (#58) ----
+
+export const consentApi = {
+  status(): Promise<ConsentStatus[]> {
+    return request<ConsentStatus[]>("/api/v1/me/consent");
+  },
+  record(type: ConsentType, granted: boolean): Promise<ConsentStatus[]> {
+    return request<ConsentStatus[]>("/api/v1/me/consent", {
+      method: "POST",
+      body: { type, granted },
+    });
+  },
+  withdraw(type: ConsentType): Promise<ConsentStatus[]> {
+    return request<ConsentStatus[]>(
+      `/api/v1/me/consent/${encodeURIComponent(type)}/withdraw`,
+      { method: "POST", body: {} },
+    );
   },
 };
 

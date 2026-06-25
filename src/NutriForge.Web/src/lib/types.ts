@@ -242,6 +242,34 @@ export interface LogMeasurementRequest {
   waistCm?: number | null;
 }
 
+// ---- Consent / GDPR (#58) ----
+
+export type ConsentType =
+  | "TermsOfService"
+  | "PrivacyPolicy"
+  | "HealthDataProcessing"
+  | "Marketing";
+
+export type LawfulBasis =
+  | "Consent"
+  | "Contract"
+  | "LegalObligation"
+  | "VitalInterests"
+  | "PublicTask"
+  | "LegitimateInterests";
+
+export interface ConsentStatus {
+  type: ConsentType;
+  version: string;
+  required: boolean;
+  lawfulBasis: LawfulBasis;
+  description: string;
+  granted: boolean;
+  decidedVersion: string | null;
+  decidedAt: string | null;
+  needsAction: boolean;
+}
+
 // ---- Hydration (#72) ----
 
 export interface HydrationDay {

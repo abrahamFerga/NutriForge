@@ -10,7 +10,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorState } from "@/components/StateMessage";
 import { useProfile, useSaveProfile, useTargets } from "@/hooks/useQueries";
-import { diaryApi, foodsApi } from "@/lib/api";
+import { consentApi, diaryApi, foodsApi } from "@/lib/api";
 import { useDebounced } from "@/hooks/useQueries";
 import { queryKeys } from "@/lib/queryKeys";
 import {
@@ -134,9 +134,13 @@ function ProfileStep({ onDone }: { onDone: () => void }) {
   const [weightKg, setWeightKg] = useState("75");
   const [activity, setActivity] = useState<ActivityLevel>("ModeratelyActive");
   const [goal, setGoal] = useState<Goal>("Maintain");
+  // GDPR consent captured at signup (#58): the required block must be accepted; marketing is optional.
+  const [agreed, setAgreed] = useState(false);
+  const [marketing, setMarketing] = useState(false);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!agreed) return;
     save.mutate(
       {
         sex,
@@ -152,7 +156,22 @@ function ProfileStep({ onDone }: { onDone: () => void }) {
         dislikes: [],
         preferredDiets: [],
       },
-      { onSuccess: onDone },
+      {
+        onSuccess: async () => {
+          try {
+            // Record the consents granted at signup. Non-fatal if it fails — the Profile page can manage them.
+            await Promise.all([
+              consentApi.record("TermsOfService", true),
+              consentApi.record("PrivacyPolicy", true),
+              consentApi.record("HealthDataProcessing", true),
+              consentApi.record("Marketing", marketing),
+            ]);
+          } catch {
+            /* consent can be managed later under Profile → Privacy & consent */
+          }
+          onDone();
+        },
+      },
     );
   }
 
@@ -218,9 +237,33 @@ function ProfileStep({ onDone }: { onDone: () => void }) {
             </Field>
           </div>
 
+          <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+            <label className="flex items-start gap-2 text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+              />
+              <span>
+                I agree to the Terms of Service and Privacy Policy, and I consent to NutriForge processing my
+                health-related data (weight, body metrics) to compute my nutrition targets.
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={marketing}
+                onChange={(e) => setMarketing(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+              />
+              <span>Send me occasional product news and tips (optional).</span>
+            </label>
+          </div>
+
           {save.isError ? <ErrorState error={save.error} /> : null}
 
-          <Button type="submit" disabled={save.isPending} className="w-full">
+          <Button type="submit" disabled={save.isPending || !agreed} className="w-full">
             {save.isPending ? <Spinner /> : <ArrowRight className="h-4 w-4" />}
             Calculate my target
           </Button>

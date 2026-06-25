@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, LoadingState } from "@/components/StateMessage";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
+import { ConsentPanel } from "@/components/ConsentPanel";
 import { useProfile, useSaveProfile } from "@/hooks/useQueries";
 import {
   ACTIVITY_LEVELS,
@@ -303,6 +304,8 @@ export function Profile() {
       </form>
 
       <NotificationsPanel />
+
+      <ConsentPanel />
     </div>
   );
 }
