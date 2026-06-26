@@ -103,6 +103,29 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer, IMealSelectAg
 {
     private static readonly MealSlot[] AllMeals = [MealSlot.Breakfast, MealSlot.Lunch, MealSlot.Dinner, MealSlot.Snack];
 
+    private static readonly string[] MealTypeTags = ["breakfast", "lunch", "dinner", "snack"];
+
+    /// <summary>The canonical lower-case tag a recipe carries to mark which meal it was written for.</summary>
+    internal static string MealTag(MealSlot meal) => meal switch
+    {
+        MealSlot.Breakfast => "breakfast",
+        MealSlot.Lunch => "lunch",
+        MealSlot.Dinner => "dinner",
+        MealSlot.Snack => "snack",
+        _ => "",
+    };
+
+    /// <summary>
+    /// A recipe is eligible for a meal slot when it carries that slot's meal-type tag — OR carries no
+    /// meal-type tag at all (untagged recipes are wildcards, so the no-AI catalog path and any legacy
+    /// recipes still produce a plan). This is what keeps dinner dishes out of breakfast slots.
+    /// </summary>
+    internal static bool MatchesMeal(Recipe r, MealSlot meal)
+    {
+        var hasMealTag = r.Tags.Any(t => MealTypeTags.Contains(t, StringComparer.OrdinalIgnoreCase));
+        return !hasMealTag || r.Tags.Contains(MealTag(meal), StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>Fully-deterministic generation (greedy SELECT). No LLM is ever consulted.</summary>
     public GenerationResult Generate(IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget)
     {
@@ -226,9 +249,12 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer, IMealSelectAg
         var bySlot = new Dictionary<(int Block, MealSlot Meal), Recipe>();
         foreach (var p in picks)
         {
-            if (byId.TryGetValue(p.RecipeId, out var recipe))
+            // Ignore picks for recipes outside the filtered pool, or whose meal type doesn't match the
+            // slot — a meal-type-mismatched proposal leaves the grid incomplete and falls back to the
+            // (meal-aware) greedy selection below, so the agent can't put a dinner dish in breakfast.
+            if (byId.TryGetValue(p.RecipeId, out var recipe) && MatchesMeal(recipe, p.Meal))
             {
-                bySlot[(p.Block, p.Meal)] = recipe; // ignore picks for recipes outside the filtered pool
+                bySlot[(p.Block, p.Meal)] = recipe;
             }
         }
 
@@ -255,15 +281,27 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer, IMealSelectAg
     private static List<PlannedSlot> GreedySelect(IReadOnlyList<Recipe> pool, PlanLayout layout)
     {
         var meals = AllMeals.Take(layout.MealsPerDay).ToArray();
-        var slots = new List<PlannedSlot>();
-        var index = 0;
 
+        // Each meal slot draws only from meal-appropriate recipes, round-robined within its own sub-pool.
+        // A meal with no matching recipes falls back to the whole pool, so a thin pool still yields a
+        // (less ideal) plan rather than failing.
+        var subPools = meals.ToDictionary(
+            m => m,
+            m =>
+            {
+                var sub = pool.Where(r => MatchesMeal(r, m)).ToList();
+                return sub.Count > 0 ? (IReadOnlyList<Recipe>)sub : pool;
+            });
+        var cursor = meals.ToDictionary(m => m, _ => 0);
+
+        var slots = new List<PlannedSlot>();
         for (var block = 1; block <= layout.NumBlocks; block++)
         {
             foreach (var meal in meals)
             {
-                var recipe = pool[index % pool.Count];
-                index++;
+                var sub = subPools[meal];
+                var recipe = sub[cursor[meal] % sub.Count];
+                cursor[meal] += 1;
                 slots.Add(new PlannedSlot { Day = block, Meal = meal, Recipe = recipe, Servings = InitialServings(recipe, layout.PerMeal) });
             }
         }

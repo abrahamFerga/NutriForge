@@ -67,8 +67,6 @@ public sealed class AutoDietService(
         var perType = Math.Clamp((horizon + 1) / 2, MinPerMealType, MaxPerMealType);
         var total = Math.Min(MaxGenerate, perType * mealTypes.Length);
         var perServingKcal = kcal / mealsPerDay;
-        IReadOnlyList<string>? forceTags = string.IsNullOrWhiteSpace(req.DietSlug) ? null : [req.DietSlug];
-
         var ids = new List<Guid>(total);
         foreach (var mealType in mealTypes)
         {
@@ -76,6 +74,13 @@ public sealed class AutoDietService(
             {
                 break;
             }
+
+            // Force a canonical meal-type tag (alongside the diet slug) onto every recipe in this batch.
+            // Without it, meal type is only soft prompt guidance and the planner — which can't tell a
+            // breakfast recipe from a dinner one — drops dinner dishes into breakfast slots (#101).
+            IReadOnlyList<string> forceTags = string.IsNullOrWhiteSpace(req.DietSlug)
+                ? [mealType]
+                : [req.DietSlug, mealType];
 
             var batch = Math.Min(perType, total - ids.Count);
             var brief = new RecipeBrief(mealType, req.DietSlug, perServingKcal, req.MaxPrepMinutes, exclude, req.Desire, Servings: 4);

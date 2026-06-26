@@ -11,7 +11,6 @@ import type {
   CreateFoodRequest,
   CreatePantryItemRequest,
   CreateRecipeRequest,
-  CreateShoppingListRequest,
   DiaryDay,
   DiaryEntry,
   DiaryParseResult,
@@ -435,22 +434,6 @@ export const pantryApi = {
     return request<void>(`/api/v1/pantry/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
-  },
-};
-
-// ---- Shopping lists ----
-
-export const shoppingApi = {
-  create(body: CreateShoppingListRequest): Promise<ShoppingListDto> {
-    return request<ShoppingListDto>("/api/v1/shopping-lists", {
-      method: "POST",
-      body,
-    });
-  },
-  get(id: string): Promise<ShoppingListDto> {
-    return request<ShoppingListDto>(
-      `/api/v1/shopping-lists/${encodeURIComponent(id)}`,
-    );
   },
 };
 
