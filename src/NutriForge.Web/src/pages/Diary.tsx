@@ -42,10 +42,19 @@ import {
 } from "@/lib/types";
 import { cn, round, toIsoDate, today } from "@/lib/utils";
 
+/** Guess the meal the user most likely wants to log, from the current hour. */
+function slotForHour(): MealSlot {
+  const h = new Date().getHours();
+  if (h < 11) return "Breakfast";
+  if (h < 15) return "Lunch";
+  if (h < 21) return "Dinner";
+  return "Snack";
+}
+
 export function Diary() {
   const qc = useQueryClient();
   const [date, setDate] = useState<string>(today());
-  const [mealSlot, setMealSlot] = useState<MealSlot>("Breakfast");
+  const [mealSlot, setMealSlot] = useState<MealSlot>(slotForHour);
 
   const diary = useDiary(date);
   const deleteEntry = useDeleteDiaryEntry(date);
@@ -461,7 +470,7 @@ function DescribeTab({
         className="w-full"
       >
         {parse.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-        Parse
+        Add these foods
       </Button>
 
       {noProvider ? (
@@ -781,7 +790,7 @@ function BarcodeTab({
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <Label htmlFor="gtin">Barcode (GTIN)</Label>
+        <Label htmlFor="gtin">Barcode number</Label>
         <Input
           id="gtin"
           inputMode="numeric"
