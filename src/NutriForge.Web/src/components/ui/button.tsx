@@ -11,16 +11,18 @@ export interface ButtonProps
 }
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 disabled:pointer-events-none disabled:opacity-50 whitespace-nowrap";
+  "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 disabled:pointer-events-none disabled:opacity-50 active:translate-y-0 whitespace-nowrap";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-brand-500 text-slate-950 hover:bg-brand-400 shadow-sm shadow-brand-500/20",
-  secondary: "bg-slate-800 text-slate-100 hover:bg-slate-700",
+    "bg-gradient-to-b from-brand-400 to-brand-600 text-slate-950 shadow-lg shadow-brand-500/25 hover:from-brand-300 hover:to-brand-500 hover:-translate-y-0.5",
+  secondary:
+    "border border-slate-700/60 bg-slate-800 text-slate-100 hover:bg-slate-700 hover:-translate-y-0.5",
   outline:
-    "border border-slate-700 bg-transparent text-slate-100 hover:bg-slate-800",
+    "border border-slate-700 bg-slate-900/40 text-slate-100 hover:bg-slate-800 hover:border-slate-600",
   ghost: "bg-transparent text-slate-300 hover:bg-slate-800 hover:text-slate-100",
-  destructive: "bg-red-600 text-white hover:bg-red-500",
+  destructive:
+    "bg-gradient-to-b from-red-500 to-red-600 text-white shadow-lg shadow-red-600/25 hover:from-red-400 hover:to-red-500 hover:-translate-y-0.5",
 };
 
 const sizes: Record<Size, string> = {
