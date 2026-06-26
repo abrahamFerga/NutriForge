@@ -13,9 +13,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Flame } from "lucide-react";
+import { Activity, Flame, LayoutDashboard, Percent, Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
+import { PageHeading, StatTile } from "@/components/PageHeading";
 import { MacroBar } from "@/components/MacroBar";
 import { WeightCard } from "@/components/WeightCard";
 import { HydrationCard } from "@/components/HydrationCard";
@@ -72,13 +73,24 @@ export function Dashboard() {
 
   const ringData = [{ name: "kcal", value: ringPct, fill: "var(--color-brand-500)" }];
 
+  const proteinConsumed = round(consumed.proteinG);
+  const proteinTarget = round(target.proteinG);
+
   return (
     <div className="space-y-6">
-      <PageHeading title="Dashboard" subtitle="Today at a glance" />
+      <PageHeading title="Dashboard" subtitle="Today at a glance" icon={LayoutDashboard} />
+
+      {/* KPI tiles */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Eaten" value={kcalConsumed} unit="kcal" icon={Flame} />
+        <StatTile label="Remaining" value={remaining} unit="kcal" icon={Target} accent />
+        <StatTile label="Protein" value={`${proteinConsumed}/${proteinTarget}`} unit="g" icon={Activity} />
+        <StatTile label="Of target" value={Math.round(ringPct)} unit="%" icon={Percent} />
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Calorie ring */}
-        <Card className="lg:col-span-1">
+        <Card className="nf-hover lg:col-span-1">
           <CardHeader>
             <CardTitle>Calories</CardTitle>
           </CardHeader>
@@ -100,7 +112,7 @@ export function Dashboard() {
                   <RadialBar
                     dataKey="value"
                     cornerRadius={12}
-                    background={{ fill: "#1e293b" }}
+                    background={{ fill: "var(--nf-surface-2)" }}
                   />
                 </RadialBarChart>
               </ResponsiveContainer>
@@ -121,7 +133,7 @@ export function Dashboard() {
         </Card>
 
         {/* Macro bars */}
-        <Card className="lg:col-span-2">
+        <Card className="nf-hover lg:col-span-2">
           <CardHeader>
             <CardTitle>Macros</CardTitle>
           </CardHeader>
@@ -246,17 +258,3 @@ function TrendChart({ data }: { data: TrendDatum[] }) {
   );
 }
 
-function PageHeading({
-  title,
-  subtitle,
-}: {
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-slate-100">{title}</h1>
-      {subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}
-    </div>
-  );
-}
