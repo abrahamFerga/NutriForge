@@ -9,6 +9,7 @@ artifacts/
 TestResults/
 *.trx
 *.coverage
+coverage-merged.xml
 coverage/
 
 # ---- Aspire / local secrets ----

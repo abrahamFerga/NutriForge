@@ -45,11 +45,6 @@ export const GOALS: readonly Goal[] = [
   "Bulk",
 ] as const;
 
-export const MACRO_STRATEGIES: readonly MacroStrategy[] = [
-  "ProteinAnchored",
-  "Percentage",
-] as const;
-
 // ---- Food ----
 
 export interface Portion {
