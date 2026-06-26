@@ -849,8 +849,8 @@ function LogForm({
   onCancel: () => void;
   onLogged: () => void;
 }) {
-  // Use controlled meal-slot when provided (barcode tab), else local state.
-  const [localMealSlot, setLocalMealSlot] = useState<MealSlot>("Breakfast");
+  // Use controlled meal-slot when provided (barcode tab), else local state (defaulted from the clock).
+  const [localMealSlot, setLocalMealSlot] = useState<MealSlot>(slotForHour);
   const mealSlot = controlledMealSlot ?? localMealSlot;
   const setMealSlot = onMealSlotChange ?? setLocalMealSlot;
   const [portionId, setPortionId] = useState<string>(
@@ -859,6 +859,8 @@ function LogForm({
   const [quantity, setQuantity] = useState<string>(
     food.portions.length > 0 ? "1" : "100",
   );
+  // The common case is "1 serving" — keep the amount controls tucked away until asked.
+  const [adjusting, setAdjusting] = useState(false);
 
   const add = useLogEntry();
   const isGrams = portionId === GRAMS_OPTION;
@@ -896,43 +898,53 @@ function LogForm({
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <MealSlotSelect id="meal" value={mealSlot} onChange={setMealSlot} />
-        <div className="space-y-1">
-          <Label htmlFor="portion">Portion</Label>
-          <Select
-            id="portion"
-            value={portionId}
-            onChange={(e) => {
-              setPortionId(e.target.value);
-              setQuantity(e.target.value === GRAMS_OPTION ? "100" : "1");
-            }}
-          >
-            {food.portions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.grams}g)
-              </option>
-            ))}
-            <option value={GRAMS_OPTION}>Grams</option>
-          </Select>
-        </div>
-      </div>
+      <MealSlotSelect id="meal" value={mealSlot} onChange={setMealSlot} />
 
-      <div className="space-y-1">
-        <Label htmlFor="qty">{isGrams ? "Grams" : "Quantity"}</Label>
-        <Input
-          id="qty"
-          type="number"
-          min={0}
-          step={isGrams ? 10 : 0.25}
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-        />
-      </div>
+      {adjusting ? (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="portion">Portion</Label>
+            <Select
+              id="portion"
+              value={portionId}
+              onChange={(e) => {
+                setPortionId(e.target.value);
+                setQuantity(e.target.value === GRAMS_OPTION ? "100" : "1");
+              }}
+            >
+              {food.portions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.grams}g)
+                </option>
+              ))}
+              <option value={GRAMS_OPTION}>Grams</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="qty">{isGrams ? "Grams" : "Quantity"}</Label>
+            <Input
+              id="qty"
+              type="number"
+              min={0}
+              step={isGrams ? 10 : 0.25}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex items-center justify-between text-xs text-slate-400">
-        <span>≈ {round(grams)}g</span>
-        <span className="font-medium text-brand-300">{estKcal} kcal</span>
+        <span>≈ {round(grams)}g · {estKcal} kcal</span>
+        {!adjusting ? (
+          <button
+            type="button"
+            onClick={() => setAdjusting(true)}
+            className="font-medium text-brand-400 hover:text-brand-300"
+          >
+            Adjust amount
+          </button>
+        ) : null}
       </div>
 
       {add.isError ? <ErrorState error={add.error} /> : null}
