@@ -20,6 +20,7 @@ import type {
   ConsentType,
   DietTemplate,
   UpsertDietTemplateRequest,
+  GenerateRecipesRequest,
   FoodDetail,
   FoodSummary,
   HouseholdMember,
@@ -399,6 +400,16 @@ export const recipesApi = {
    */
   importPreview(body: ImportRecipeRequest): Promise<ImportPreviewDto> {
     return request<ImportPreviewDto>("/api/v1/recipes/import/preview", {
+      method: "POST",
+      body,
+    });
+  },
+  /**
+   * Generate original recipes with AI (#101) — no manual authoring; nutrition is computed by the
+   * catalog/reference resolver. Throws {@link ApiError} 503 when no AI provider is configured.
+   */
+  generate(body: GenerateRecipesRequest): Promise<RecipeDto[]> {
+    return request<RecipeDto[]>("/api/v1/recipes/generate", {
       method: "POST",
       body,
     });

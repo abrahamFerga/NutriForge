@@ -538,6 +538,18 @@ export interface DietTemplate {
   desire: string | null;
 }
 
+/** Ask the AI to generate original recipes (#101). All fields optional. */
+export interface GenerateRecipesRequest {
+  count?: number;
+  mealType?: string | null;
+  dietSlug?: string | null;
+  targetKcal?: number | null;
+  maxPrepMinutes?: number | null;
+  exclude?: string[] | null;
+  cuisine?: string | null;
+  servings?: number | null;
+}
+
 /** Create/update a saved diet preset. */
 export interface UpsertDietTemplateRequest {
   name: string;

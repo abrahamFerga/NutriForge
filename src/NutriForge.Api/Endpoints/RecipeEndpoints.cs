@@ -115,6 +115,28 @@ public static class RecipeEndpoints
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("ImportRecipePreview");
 
+        // Generate original recipes with AI (#101) — no manual authoring. The model writes the recipe;
+        // the catalog + reference resolver own every macro. Returns the created (owned) recipes.
+        group.MapPost("/generate", async (GenerateRecipesRequest req, RecipeGenerationService gen, ICurrentUser user, CancellationToken ct) =>
+        {
+            if (!gen.IsConfigured)
+            {
+                return Results.Problem(title: "Recipe generation unavailable",
+                    detail: "AI recipe generation needs an AI provider to be configured.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var count = Math.Clamp(req?.Count ?? 3, 1, 12);
+            var brief = new RecipeBrief(
+                req?.MealType, req?.DietSlug, req?.TargetKcal, req?.MaxPrepMinutes,
+                req?.Exclude, req?.Cuisine, Math.Clamp(req?.Servings ?? 4, 1, 12));
+
+            var created = await gen.GenerateAsync(user.CurrentUserId(), brief, count, ct);
+            return Results.Ok(created);
+        })
+            .RequireRateLimiting(RateLimitPolicies.Expensive)
+            .WithName("GenerateRecipes");
+
         return app;
     }
 
