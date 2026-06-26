@@ -213,6 +213,14 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
                 }
             }
 
+            // Fallback (#101): an ingredient the catalog doesn't carry resolves against the curated
+            // reference table (deterministic, never the LLM) so AI-generated / freely-imported recipes
+            // still compute their nutrition instead of being stuck at 0 kcal.
+            if (!ri.Resolved && NutritionReference.Resolve(line.Name, line.Quantity, line.Unit) is { } refHit)
+            {
+                ri.SetContribution(refHit.Grams, refHit.Macros);
+            }
+
             recipe.AddIngredient(ri);
         }
 
