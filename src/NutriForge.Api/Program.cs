@@ -1,6 +1,4 @@
 using System.Text.Json.Serialization;
-using OpenTelemetry;
-using OpenTelemetry.Metrics;
 using NutriForge.Api.Auth;
 using NutriForge.Api.Endpoints;
 using NutriForge.Api.Middleware;
@@ -11,6 +9,8 @@ using NutriForge.Infrastructure;
 using NutriForge.Infrastructure.Ai;
 using NutriForge.Infrastructure.OpenFoodFacts;
 using NutriForge.Infrastructure.RecipeImport;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 

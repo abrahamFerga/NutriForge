@@ -1,6 +1,6 @@
+using NutriForge.ImportWorker;
 using NutriForge.Infrastructure;
 using NutriForge.Infrastructure.RecipeImport;
-using NutriForge.ImportWorker;
 
 var builder = Host.CreateApplicationBuilder(args);
 

@@ -1,7 +1,7 @@
+using NutriForge.Api.Setup;
 using NutriForge.Application.Abstractions;
 using NutriForge.Application.Authorization;
 using NutriForge.Application.DietGen;
-using NutriForge.Api.Setup;
 
 namespace NutriForge.Api.Endpoints;
 
