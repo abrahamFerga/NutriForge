@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Barcode,
+  BookOpen,
   Camera,
   ChevronLeft,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeading } from "@/components/PageHeading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -77,36 +79,37 @@ export function Diary() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Diary</h1>
-          <p className="text-sm text-slate-400">Log and review your day</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => copyYesterday.mutate()}
-            disabled={copyYesterday.isPending}
-            title="Copy yesterday's entries onto this day"
-          >
-            {copyYesterday.isPending ? <Spinner /> : <Copy className="h-4 w-4" />}
-            Copy yesterday
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => shiftDate(-1)} aria-label="Previous day">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value || today())}
-            className="w-44"
-          />
-          <Button variant="outline" size="icon" onClick={() => shiftDate(1)} aria-label="Next day">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PageHeading
+        title="Diary"
+        subtitle="Log and review your day"
+        icon={BookOpen}
+        action={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyYesterday.mutate()}
+              disabled={copyYesterday.isPending}
+              title="Copy yesterday's entries onto this day"
+            >
+              {copyYesterday.isPending ? <Spinner /> : <Copy className="h-4 w-4" />}
+              Copy yesterday
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => shiftDate(-1)} aria-label="Previous day">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value || today())}
+              className="w-44"
+            />
+            <Button variant="outline" size="icon" onClick={() => shiftDate(1)} aria-label="Next day">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </>
+        }
+      />
 
       {copyYesterday.isError ? <ErrorState error={copyYesterday.error} /> : null}
 

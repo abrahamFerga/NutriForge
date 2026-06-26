@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, User } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeading } from "@/components/PageHeading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,12 +136,11 @@ export function Profile() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Profile</h1>
-        <p className="text-sm text-slate-400">
-          Your details drive calorie and macro targets.
-        </p>
-      </div>
+      <PageHeading
+        title="Profile"
+        subtitle="Your details drive calorie and macro targets."
+        icon={User}
+      />
 
       <form onSubmit={submit} className="space-y-6">
         <Card>

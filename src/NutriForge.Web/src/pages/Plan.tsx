@@ -7,6 +7,7 @@ import {
 import {
   AlertTriangle,
   Bookmark,
+  CalendarRange,
   Check,
   ChefHat,
   CookingPot,
@@ -18,6 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { PageHeading } from "@/components/PageHeading";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,12 +57,11 @@ export function Plan() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Diet plan</h1>
-        <p className="text-sm text-slate-400">
-          Generate a meal plan, then turn it into a shopping list
-        </p>
-      </div>
+      <PageHeading
+        title="Diet plan"
+        subtitle="Generate a meal plan, then turn it into a shopping list"
+        icon={CalendarRange}
+      />
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-2">

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
+  ChefHat,
   Clock,
   Globe,
   Pencil,
@@ -16,6 +17,7 @@ import {
   Youtube,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeading } from "@/components/PageHeading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,38 +100,37 @@ export function Recipes() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Recipes</h1>
-          <p className="text-sm text-slate-400">
-            Browse recipes and their per-serving nutrition
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <AdminToggle />
-          <Button
-            variant="outline"
-            onClick={() => {
-              setShowImport((v) => !v);
-              setShowForm(false);
-              setImportDraft(null);
-            }}
-          >
-            <Youtube className="h-4 w-4" />
-            Import
-          </Button>
-          <Button
-            onClick={() => {
-              setShowForm((v) => !v);
-              setShowImport(false);
-              setImportDraft(null);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            New recipe
-          </Button>
-        </div>
-      </div>
+      <PageHeading
+        title="Recipes"
+        subtitle="Browse recipes and their per-serving nutrition"
+        icon={ChefHat}
+        action={
+          <>
+            <AdminToggle />
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowImport((v) => !v);
+                setShowForm(false);
+                setImportDraft(null);
+              }}
+            >
+              <Youtube className="h-4 w-4" />
+              Import
+            </Button>
+            <Button
+              onClick={() => {
+                setShowForm((v) => !v);
+                setShowImport(false);
+                setImportDraft(null);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              New recipe
+            </Button>
+          </>
+        }
+      />
 
       {showImport && !importDraft ? (
         <ImportPanel
