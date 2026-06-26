@@ -53,8 +53,23 @@ const DIET_SLUGS: { value: DietSlug | ""; label: string }[] = [
   { value: "high-protein", label: "High protein" },
 ];
 
+const MEALS_PER_DAY: { value: string; label: string }[] = [
+  { value: "3", label: "3 meals" },
+  { value: "4", label: "4 (+ snack)" },
+];
+
+/** A fetch aborted by the user's Cancel button — not a real error to surface. */
+function isAbortError(e: unknown): boolean {
+  return (
+    typeof e === "object" && e !== null && (e as { name?: string }).name === "AbortError"
+  );
+}
+
 export function Plan() {
   const [planId, setPlanId] = useState<string | null>(null);
+  // True from the moment "Generate" is tapped until the new plan id arrives (or it errors), so the
+  // result column shows the loading card immediately instead of lingering on the previous plan.
+  const [generating, setGenerating] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -66,12 +81,21 @@ export function Plan() {
 
       <div className="grid gap-6 lg:grid-cols-5">
         <div className="space-y-6 lg:col-span-2">
-          <PlanForm onCreated={setPlanId} />
+          <PlanForm
+            onGenerateStart={() => setGenerating(true)}
+            onCreated={(id) => {
+              setGenerating(false);
+              setPlanId(id);
+            }}
+            onGenerateError={() => setGenerating(false)}
+          />
           <PantryPanel />
         </div>
 
         <div className="lg:col-span-3">
-          {planId ? (
+          {generating ? (
+            <GeneratingCard />
+          ) : planId ? (
             <PlanResult key={planId} planId={planId} />
           ) : (
             <Card>
@@ -111,7 +135,17 @@ function memberToRow(m: HouseholdMember): MemberRow {
   };
 }
 
-function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
+function PlanForm({
+  onCreated,
+  onGenerateStart,
+  onGenerateError,
+}: {
+  onCreated: (id: string) => void;
+  /** Called the instant a generation starts, so the result column can show its loading state. */
+  onGenerateStart: () => void;
+  /** Called if a generation fails, so the result column can stop showing the loading state. */
+  onGenerateError: () => void;
+}) {
   const queryClient = useQueryClient();
   const [dietSlug, setDietSlug] = useState<DietSlug | "">("");
   const [kcalTarget, setKcalTarget] = useState("");
@@ -121,6 +155,10 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [desire, setDesire] = useState("");
   const [presetName, setPresetName] = useState("");
+  const [meals, setMeals] = useState("3");
+  // Lets the user cancel an in-flight generation; aborting the fetch also cancels the server-side
+  // work, because the endpoint ties its CancellationToken to the request.
+  const abortRef = useRef<AbortController | null>(null);
 
   // Saved diet presets (#102): the user keeps making the same kind of plan, so load/save the parameters.
   const templates = useQuery({ queryKey: queryKeys.dietTemplates, queryFn: dietTemplatesApi.list });
@@ -131,6 +169,7 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
     setMaxPrep(t.maxPrepMinutes != null ? String(t.maxPrepMinutes) : "");
     setDays(String(t.horizonDays));
     setBlockSize(String(t.blockSize));
+    setMeals(t.mealsPerDay != null ? String(t.mealsPerDay) : "3");
     setDesire(t.desire ?? "");
   }
 
@@ -143,6 +182,7 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
         maxPrepMinutes: maxPrep.trim() ? Number(maxPrep) : null,
         horizonDays: Number(days) || 7,
         blockSize: Number(blockSize) || 1,
+        mealsPerDay: Number(meals) || null,
         desire: desire.trim() || null,
       }),
     onSuccess: () => {
@@ -153,7 +193,9 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
 
   const generateTemplate = useMutation({
     mutationFn: (id: string) => dietTemplatesApi.generate(id),
+    onMutate: onGenerateStart,
     onSuccess: (plan) => onCreated(plan.id),
+    onError: onGenerateError,
   });
 
   const deleteTemplate = useMutation({
@@ -208,6 +250,7 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
         targetKcal: m.mode === "own" ? Number(m.kcal) || undefined : undefined,
       }));
     if (dietSlug) body.dietSlug = dietSlug;
+    if (Number(meals) > 0) body.mealsPerDay = Number(meals);
     if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
     if (maxPrep.trim()) body.maxPrepMinutes = Number(maxPrep);
     if (Number(blockSize) > 1) body.blockSize = Number(blockSize);
@@ -222,19 +265,22 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   // transparently falls back to building from existing recipes — so it always just works.
   const generate = useMutation({
     mutationFn: async () => {
+      const controller = new AbortController();
+      abortRef.current = controller;
       await syncHousehold();
       const body = buildPlanBody();
       try {
-        const res = await dietPlansApi.auto(body);
+        const res = await dietPlansApi.auto(body, controller.signal);
         return { planId: res.plan.id, generated: res.recipesGenerated };
       } catch (e) {
         if (e instanceof ApiError && e.status === 503) {
-          const plan = await dietPlansApi.create(body);
+          const plan = await dietPlansApi.create(body, controller.signal);
           return { planId: plan.id, generated: 0 };
         }
         throw e;
       }
     },
+    onMutate: onGenerateStart,
     onSuccess: (res) => {
       setAutoNote(
         res.generated > 0
@@ -244,7 +290,14 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
       queryClient.invalidateQueries({ queryKey: queryKeys.recipes });
       onCreated(res.planId);
     },
+    onError: onGenerateError,
   });
+
+  // Abort the in-flight generation. The mutation rejects with an AbortError (suppressed below) and
+  // its onError resets the result column; the server stops too via the cancelled request token.
+  function cancelGenerate() {
+    abortRef.current?.abort();
+  }
 
   return (
     <Card>
@@ -252,20 +305,32 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
         <CardTitle>Generate a plan</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Diet — the one choice worth making up front. */}
-        <div className="space-y-1">
-          <Label htmlFor="diet-slug">Diet</Label>
-          <Select
-            id="diet-slug"
-            value={dietSlug}
-            onChange={(e) => setDietSlug(e.target.value as DietSlug | "")}
-          >
-            {DIET_SLUGS.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </Select>
+        {/* The two choices worth making up front — diet, and how many meals a day (incl. a snack). */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="diet-slug">Diet</Label>
+            <Select
+              id="diet-slug"
+              value={dietSlug}
+              onChange={(e) => setDietSlug(e.target.value as DietSlug | "")}
+            >
+              {DIET_SLUGS.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="meals">Meals per day</Label>
+            <Select id="meals" value={meals} onChange={(e) => setMeals(e.target.value)}>
+              {MEALS_PER_DAY.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
 
         {/* Cooking for — one line for the common case; expands only when you add someone. */}
@@ -349,20 +414,35 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
           )}
         </div>
 
-        {generate.isError ? <ErrorState error={generate.error} /> : null}
+        {generate.isError && !isAbortError(generate.error) ? (
+          <ErrorState error={generate.error} />
+        ) : null}
 
-        {/* The one primary action — the AI writes the recipes and the whole plan. */}
-        <Button
-          onClick={() => {
-            setAutoNote(null);
-            generate.mutate();
-          }}
-          disabled={generate.isPending}
-          className="w-full"
-        >
-          {generate.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-          Generate my plan
-        </Button>
+        {/* The one primary action — the AI writes the recipes and the whole plan. While it runs the
+            user can cancel and start over (Cancel also stops the server-side work). */}
+        {generate.isPending ? (
+          <div className="flex gap-2">
+            <Button disabled className="flex-1">
+              <Spinner />
+              Generating…
+            </Button>
+            <Button variant="outline" onClick={cancelGenerate} aria-label="Cancel generation">
+              <X className="h-4 w-4" />
+              Cancel
+            </Button>
+          </div>
+        ) : (
+          <Button
+            onClick={() => {
+              setAutoNote(null);
+              generate.mutate();
+            }}
+            className="w-full"
+          >
+            <Sparkles className="h-4 w-4" />
+            Generate my plan
+          </Button>
+        )}
         <p className="text-center text-xs text-slate-500">
           We&apos;ll write the recipes and a full week of meals for you.
           {autoNote ? <span className="text-brand-400"> {autoNote}</span> : null}

@@ -30,6 +30,12 @@ public sealed class RecipeGenAgent(IAssistantAgentFactory factory) : IRecipeGenA
           concrete quantity + unit for each, so the app can resolve nutrition. Avoid obscure brand items.
         - Respect the requested diet, and DO NOT use any ingredient in the exclusion list or anything
           derived from it (these are allergies — treat as safety-critical).
+        - The recipe MUST suit the requested meal type. A breakfast must be a dish people genuinely eat
+          for breakfast (eggs, omelettes, oats, yogurt bowls, pancakes, breakfast tacos/burritos) — never
+          a lunch or dinner entrée relabelled as breakfast. When a cuisine or style is requested, choose
+          THAT cuisine's breakfast dishes (e.g. for Mexican breakfast: huevos rancheros, chilaquiles,
+          breakfast tacos, molletes). Lunch and dinner are fuller mains; a snack is small and simple
+          (a handful, a single piece, a small bowl), not a full meal.
         - Aim each recipe near the target calories per serving if one is given, using portion sizes (you do
           not state the numbers — just choose sensible amounts).
         - Make the recipes varied (different proteins / cuisines / methods); do not repeat a recipe.
