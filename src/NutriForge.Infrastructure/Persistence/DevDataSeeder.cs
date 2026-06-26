@@ -46,17 +46,17 @@ public static class DevDataSeeder
         // YieldFactor (cooked = raw × factor) + whether the recipe states raw or cooked grams. The
         // basis mirrors the linked food: "raw chicken"/"dry oats" ⇒ recipe grams are raw; "cooked rice"/
         // "cooked beans" ⇒ recipe grams are cooked, so shopping divides the yield back out to buy raw.
-        var iChicken = Ing("chicken breast", "Meat & Seafood", chicken, gramsPerCount: 174, aliases: ["chicken"], yield: 0.75, gramsAreRaw: true);
-        var iRice = Ing("white rice", "Pantry", rice, yield: 2.8, gramsAreRaw: false);
-        var iOats = Ing("rolled oats", "Pantry", oats, aliases: ["oats"], yield: 2.2, gramsAreRaw: true);
-        var iBanana = Ing("banana", "Produce", banana, gramsPerCount: 118);
+        var iChicken = Ing("chicken breast", "Meat & Seafood", chicken, gramsPerCount: 174, aliases: ["chicken", "chicken breasts"], yield: 0.75, gramsAreRaw: true);
+        var iRice = Ing("white rice", "Pantry", rice, aliases: ["rice"], yield: 2.8, gramsAreRaw: false);
+        var iOats = Ing("rolled oats", "Pantry", oats, aliases: ["oats", "oatmeal"], yield: 2.2, gramsAreRaw: true);
+        var iBanana = Ing("banana", "Produce", banana, gramsPerCount: 118, aliases: ["bananas"]);
         var iOil = Ing("olive oil", "Pantry", oliveOil, density: 0.91);
-        var iAlmonds = Ing("almonds", "Pantry", almonds);
+        var iAlmonds = Ing("almonds", "Pantry", almonds, aliases: ["almond"]);
         var iYogurt = Ing("greek yogurt", "Dairy & Eggs", yogurt, aliases: ["yogurt"]);
         var iTofu = Ing("tofu", "Produce", tofu);
         var iBeans = Ing("black beans", "Pantry", blackBeans, aliases: ["beans"], yield: 2.5, gramsAreRaw: false);
         var iSpinach = Ing("spinach", "Produce", spinach);
-        var iPb = Ing("peanut butter", "Pantry", peanutButter);
+        var iPb = Ing("peanut butter", "Pantry", peanutButter, aliases: ["pb"]);
         db.Ingredients.AddRange(iChicken, iRice, iOats, iBanana, iOil, iAlmonds, iYogurt, iTofu, iBeans, iSpinach, iPb);
 
         // ---- Diets as data ----

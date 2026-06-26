@@ -12,7 +12,8 @@ namespace NutriForge.Application.Tests;
 public sealed class RecipesAndShoppingTests
 {
     private static Ingredient SeedFoodAndIngredient(
-        NutriForgeDbContext db, string name, string aisle, double kcal, double protein, double fat, double carb)
+        NutriForgeDbContext db, string name, string aisle, double kcal, double protein, double fat, double carb,
+        params string[] aliases)
     {
         var food = new Domain.Catalog.Food
         {
@@ -22,7 +23,13 @@ public sealed class RecipesAndShoppingTests
             NutrientProfile = new NutrientProfile { KcalPer100g = kcal, ProteinPer100g = protein, FatPer100g = fat, CarbPer100g = carb },
         };
         db.Foods.Add(food);
-        var ingredient = new Ingredient { CanonicalName = name, AisleCategory = aisle, DefaultFoodId = food.Id };
+        var ingredient = new Ingredient
+        {
+            CanonicalName = name,
+            AisleCategory = aisle,
+            DefaultFoodId = food.Id,
+            Aliases = [.. aliases],
+        };
         db.Ingredients.Add(ingredient);
         return ingredient;
     }
@@ -43,6 +50,38 @@ public sealed class RecipesAndShoppingTests
         // 300 g rice @ 130 kcal/100g = 390 kcal total → 195 per serving (2 servings), computed by code.
         Assert.True(recipe.IsNutritionComputed);
         Assert.Equal(195, recipe.KcalPerServing);
+    }
+
+    /// <summary>
+    /// #20 acceptance: an alias on a free-text recipe line resolves to its canonical ingredient — so
+    /// nutrition is computed from the canonical's default food, and the shopping list inherits the
+    /// canonical's aisle (not a guess from the raw line text).
+    /// </summary>
+    [Fact]
+    public async Task Alias_resolves_a_recipe_line_to_its_canonical_ingredient()
+    {
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
+        // Canonical "chicken breast" with the alias "chicken".
+        SeedFoodAndIngredient(db, "chicken breast", "Meat & Seafood", 120, 22.5, 2.6, 0, "chicken");
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
+        // The recipe line uses the ALIAS, not the canonical name.
+        var recipe = await recipes.CreateAsync(new CreateRecipeRequest(
+            "Grilled chicken", Servings: 1, TotalMinutes: 15, Instructions: null, Tags: ["dinner"],
+            Ingredients: [new RecipeIngredientInput(300, "g", "chicken")]), ownerUserId: userId);
+
+        // Resolved → nutrition computed from the canonical's default food (300 g @ 120 kcal/100g = 360).
+        Assert.True(recipe.IsNutritionComputed);
+        Assert.Equal(360, recipe.KcalPerServing);
+        Assert.True(recipe.Ingredients.Single().Resolved);
+
+        // And the shopping list groups it under the canonical's aisle, reached only via the alias.
+        var shopping = new ShoppingListService(db, db);
+        var list = await shopping.GenerateAsync(userId, [new ShoppingRecipeLine(recipe.Id, 1)], mealPlanId: null);
+        var meatAisle = list.Aisles.Single(a => a.Aisle == "Meat & Seafood");
+        Assert.Equal(300, meatAisle.Items.Single().Grams);
     }
 
     [Fact]

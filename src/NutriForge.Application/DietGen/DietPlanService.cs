@@ -20,12 +20,19 @@ public sealed class DietPlanService(
     IDietIntentParser parser,
     DietPlanGenerator generator,
     ShoppingListService shopping,
-    IClock clock)
+    IClock clock,
+    Observability.NutriForgeMetrics? metrics = null)
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Create a plan (PARSE + persist as Generating) and return it; the worker generates it.</summary>
-    public async Task<DietPlanDto> CreateAsync(Guid userId, CreateDietPlanRequest req, CancellationToken ct = default)
+    /// <summary>
+    /// Create a plan (PARSE + persist as Generating) and return it. When <paramref name="onlyRecipeIds"/>
+    /// is non-null the plan is built from EXACTLY those recipes (the auto-diet flow passes the recipes it
+    /// just wrote, so the plan never draws from the user's catalog); null uses the whole catalog.
+    /// </summary>
+    public async Task<DietPlanDto> CreateAsync(
+        Guid userId, CreateDietPlanRequest req,
+        IReadOnlyCollection<Guid>? onlyRecipeIds = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(req);
 
@@ -34,8 +41,15 @@ public sealed class DietPlanService(
 
         var kcalTarget = req.KcalTarget ?? target?.Kcal ?? 2000;
         var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var k in (req.ExcludeAllergens ?? []).Concat(req.Dislikes ?? [])
-            .Concat(profile?.Allergens ?? []).Concat(profile?.Dislikes ?? []))
+        // Allergens are safety-critical → expand through the ontology so derivatives (milk→butter/cheese/
+        // whey, nuts→almond/cashew, …) are caught too, not just the literal word (#60).
+        foreach (var k in AllergenOntology.Expand((req.ExcludeAllergens ?? []).Concat(profile?.Allergens ?? [])))
+        {
+            exclude.Add(k);
+        }
+
+        // Dislikes are a preference, not a safety constraint → excluded literally only.
+        foreach (var k in (req.Dislikes ?? []).Concat(profile?.Dislikes ?? []))
         {
             if (!string.IsNullOrWhiteSpace(k))
             {
@@ -72,9 +86,13 @@ public sealed class DietPlanService(
 
         // Run the deterministic pipeline now (it's fast) so the 202 poll returns a finished plan.
         // The background worker remains the path for slow, LLM-backed SELECT in future.
-        await FinishGenerationAsync(plan, intent, ct).ConfigureAwait(false);
+        await FinishGenerationAsync(plan, intent, onlyRecipeIds, ct).ConfigureAwait(false);
 
-        AttachMembers(plan, req.Members);
+        // When the request carries no explicit members, fall back to the user's SAVED household (#100) so
+        // the partner/children they always cook for are attached automatically — no re-adding each plan. A
+        // non-null Members (even empty) is an explicit override and wins.
+        var members = req.Members ?? await LoadSavedHouseholdAsync(userId, ct).ConfigureAwait(false);
+        AttachMembers(plan, members);
 
         db.MealPlans.Add(plan);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -82,19 +100,30 @@ public sealed class DietPlanService(
         return ToDto(plan);
     }
 
-    /// <summary>Run FILTER → SELECT → VERIFY → REPAIR over the catalog pool and finish the plan.</summary>
-    private async Task FinishGenerationAsync(MealPlan plan, DietIntent intent, CancellationToken ct)
+    /// <summary>Run FILTER → SELECT → VERIFY → REPAIR over the (optionally restricted) pool and finish the plan.</summary>
+    private async Task FinishGenerationAsync(
+        MealPlan plan, DietIntent intent, IReadOnlyCollection<Guid>? onlyRecipeIds, CancellationToken ct)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew(); // #50 — p95 plan-latency SLO
+
         // Order by Id so the greedy round-robin pool is stable: same inputs ⇒ same plan (deterministic
         // generation, independent of DB heap order). Eaters never enters here.
-        var recipes = await catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
-            .Where(r => r.IsNutritionComputed).OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false);
+        var query = catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
+            .Where(r => r.IsNutritionComputed);
+        if (onlyRecipeIds is not null)
+        {
+            // Auto-diet: build from EXACTLY the recipes just written for this plan (empty ⇒ empty pool ⇒
+            // an honest "infeasible" rather than silently falling back to the user's catalog).
+            query = query.Where(r => onlyRecipeIds.Contains(r.Id));
+        }
+
+        var recipes = await query.OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false);
         var diet = string.IsNullOrEmpty(intent.DietSlug)
             ? null
             : await catalog.DietTypes.AsNoTracking().FirstOrDefaultAsync(d => d.Slug == intent.DietSlug, ct).ConfigureAwait(false);
 
         var pool = RecipeFilter.Filter(recipes, intent, diet);
-        var result = generator.Generate(pool, intent, plan.TargetKcal);
+        var result = await generator.GenerateAsync(pool, intent, plan.TargetKcal, ct).ConfigureAwait(false);
 
         plan.ClearSlots();
         foreach (var s in result.Slots)
@@ -117,6 +146,14 @@ public sealed class DietPlanService(
         plan.AchievedProteinG = result.DailyAverage.ProteinG;
         plan.AchievedFatG = result.DailyAverage.FatG;
         plan.AchievedCarbG = result.DailyAverage.CarbG;
+
+        // #50 — plan correctness + latency. within_target mirrors the VERIFY tolerance; allergens_honored
+        // re-asserts the gate over the final slots (the spec's "100% honor declared allergens").
+        sw.Stop();
+        var deviationPct = plan.TargetKcal > 0 ? (result.DailyAverage.Kcal - plan.TargetKcal) / plan.TargetKcal * 100.0 : 0;
+        var withinTarget = result.Feasible && Math.Abs(deviationPct) <= PlanVerifier.KcalTolerancePct * 100.0;
+        var allergensHonored = PlanVerifier.AllergensClear(result.Slots, intent.ExcludeKeywords);
+        metrics?.PlanGenerated(result.Feasible, withinTarget, allergensHonored, deviationPct, sw.Elapsed.TotalSeconds);
     }
 
     public async Task<DietPlanDto?> GetAsync(Guid userId, Guid id, CancellationToken ct = default)
@@ -174,6 +211,15 @@ public sealed class DietPlanService(
     /// member is present they are the sole quantity authority and <see cref="MealPlan.Eaters"/> is
     /// re-derived to the headcount (labels only); with no members the plan keeps its Eaters multiplier.
     /// </summary>
+    /// <summary>Load the user's saved household as plan-member inputs, or null when they've saved nobody.</summary>
+    private async Task<IReadOnlyList<PlanMemberInput>?> LoadSavedHouseholdAsync(Guid userId, CancellationToken ct)
+    {
+        var saved = await db.HouseholdMembers.AsNoTracking()
+            .Where(m => m.UserId == userId)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return saved.Count == 0 ? null : HouseholdService.ToPlanMemberInputs(saved);
+    }
+
     private static void AttachMembers(MealPlan plan, IReadOnlyList<PlanMemberInput>? members)
     {
         if (members is not { Count: > 0 })

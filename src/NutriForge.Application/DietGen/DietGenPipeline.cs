@@ -93,32 +93,78 @@ public interface IPortionOptimizer
 }
 
 /// <summary>
-/// The hybrid generate-and-check generator: greedy SELECT (deterministic; an LLM agent can replace
-/// it later) → VERIFY → LP REPAIR → VERIFY. The LLM never owns a number; this is all deterministic.
+/// The hybrid generate-and-check generator: SELECT → VERIFY → LP REPAIR → VERIFY. SELECT is greedy
+/// and deterministic by default; an optional MAF agent (#36) may instead compose the selection to
+/// optimize soft objectives (variety, no-repeat, cuisine balance, batching). Either way the LLM never
+/// owns a number and never bypasses a check — its picks pass through the identical VERIFY/REPAIR/
+/// allergen path, and any missing/garbage/unsafe proposal falls back to greedy.
 /// </summary>
-public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
+public sealed class DietPlanGenerator(IPortionOptimizer optimizer, IMealSelectAgent? selectAgent = null)
 {
     private static readonly MealSlot[] AllMeals = [MealSlot.Breakfast, MealSlot.Lunch, MealSlot.Dinner, MealSlot.Snack];
 
+    /// <summary>Fully-deterministic generation (greedy SELECT). No LLM is ever consulted.</summary>
     public GenerationResult Generate(IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget)
     {
         ArgumentNullException.ThrowIfNull(pool);
         ArgumentNullException.ThrowIfNull(intent);
 
-        var mealsPerDay = Math.Clamp(intent.MealsPerDay, 1, 4);
-        if (pool.Count == 0)
+        if (Layout(pool, intent, kcalTarget) is not { } layout)
         {
-            return new GenerationResult(false, [], Macros.Zero,
-                "No recipes match your constraints — relax the diet/prep time or add recipes.");
+            return EmptyPoolResult();
         }
 
-        // Day-block rotation: cook one distinct meal-set per block, not per calendar day. blockSize=1 ⇒
-        // numBlocks=HorizonDays ⇒ a fresh set every day (the original behaviour).
+        var slots = GreedySelect(pool, layout);
+        return Finalize(slots, intent, kcalTarget, layout.NumBlocks);
+    }
+
+    /// <summary>
+    /// Generation that lets the meal-select agent (when configured) compose SELECT, then runs the same
+    /// deterministic VERIFY → REPAIR → allergen re-check. Falls back to <see cref="Generate"/>'s greedy
+    /// selection when no agent is configured or its proposal is unusable.
+    /// </summary>
+    public async Task<GenerationResult> GenerateAsync(
+        IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(pool);
+        ArgumentNullException.ThrowIfNull(intent);
+
+        if (Layout(pool, intent, kcalTarget) is not { } layout)
+        {
+            return EmptyPoolResult();
+        }
+
+        var slots = await TryAgentSelectAsync(pool, intent, layout, ct).ConfigureAwait(false)
+            ?? GreedySelect(pool, layout);
+        return Finalize(slots, intent, kcalTarget, layout.NumBlocks);
+    }
+
+    private static GenerationResult EmptyPoolResult() => new(
+        false, [], Macros.Zero, "No recipes match your constraints — relax the diet/prep time or add recipes.");
+
+    // The plan shape: meals/day, blocks, and the per-meal kcal budget. Null when the pool is empty.
+    // Day-block rotation: cook one distinct meal-set per block, not per calendar day. blockSize=1 ⇒
+    // numBlocks=HorizonDays ⇒ a fresh set every day (the original behaviour).
+    private static PlanLayout? Layout(IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget)
+    {
+        if (pool.Count == 0)
+        {
+            return null;
+        }
+
+        var mealsPerDay = Math.Clamp(intent.MealsPerDay, 1, 4);
         var blockSize = Math.Clamp(intent.BlockSize, 1, Math.Max(intent.HorizonDays, 1));
         var numBlocks = (int)Math.Ceiling(Math.Max(intent.HorizonDays, 1) / (double)blockSize);
+        var perMeal = kcalTarget / mealsPerDay; // mealsPerDay is clamped ≥ 1
+        return new PlanLayout(mealsPerDay, numBlocks, perMeal);
+    }
 
-        var slots = GreedySelect(pool, intent, kcalTarget, mealsPerDay, numBlocks);
+    private readonly record struct PlanLayout(int MealsPerDay, int NumBlocks, double PerMeal);
 
+    // VERIFY → REPAIR → VERIFY → allergen re-check → explain. Shared by both SELECT strategies, so the
+    // agent path inherits every safety guarantee unchanged.
+    private GenerationResult Finalize(List<PlannedSlot> slots, DietIntent intent, double kcalTarget, int numBlocks)
+    {
         var (ok, avg) = PlanVerifier.Verify(slots, kcalTarget, numBlocks);
         if (!ok)
         {
@@ -133,7 +179,7 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
             (ok, avg) = PlanVerifier.Verify(slots, kcalTarget, numBlocks);
         }
 
-        // Final defense-in-depth allergen re-check.
+        // Final defense-in-depth allergen re-check — enforced regardless of who chose the recipes.
         if (!PlanVerifier.AllergensClear(slots, intent.ExcludeKeywords))
         {
             return new GenerationResult(false, [], avg, "Could not build an allergen-safe plan from the available recipes.");
@@ -148,29 +194,87 @@ public sealed class DietPlanGenerator(IPortionOptimizer optimizer)
         return new GenerationResult(true, slots, avg, Explain(avg, kcalTarget, intent));
     }
 
+    // Ask the agent (if configured) for a selection and turn it into slots. Returns null — meaning
+    // "fall back to greedy" — when there is no agent, it isn't configured, it throws, or the proposal
+    // doesn't fully + validly cover the grid from the pool.
+    private async Task<List<PlannedSlot>?> TryAgentSelectAsync(
+        IReadOnlyList<Recipe> pool, DietIntent intent, PlanLayout layout, CancellationToken ct)
+    {
+        if (selectAgent is null || !selectAgent.IsConfigured)
+        {
+            return null;
+        }
+
+        IReadOnlyList<MealSelection>? picks;
+        try
+        {
+            picks = await selectAgent.SelectAsync(pool, intent, layout.NumBlocks, layout.MealsPerDay, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // any agent failure must degrade to deterministic selection, never fail generation
+        catch (Exception)
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+
+        if (picks is null || picks.Count == 0)
+        {
+            return null;
+        }
+
+        var byId = pool.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+        var bySlot = new Dictionary<(int Block, MealSlot Meal), Recipe>();
+        foreach (var p in picks)
+        {
+            if (byId.TryGetValue(p.RecipeId, out var recipe))
+            {
+                bySlot[(p.Block, p.Meal)] = recipe; // ignore picks for recipes outside the filtered pool
+            }
+        }
+
+        var meals = AllMeals.Take(layout.MealsPerDay).ToArray();
+        var slots = new List<PlannedSlot>();
+        for (var block = 1; block <= layout.NumBlocks; block++)
+        {
+            foreach (var meal in meals)
+            {
+                if (!bySlot.TryGetValue((block, meal), out var recipe))
+                {
+                    return null; // an incomplete proposal ⇒ fall back wholesale, don't half-fill
+                }
+
+                slots.Add(new PlannedSlot { Day = block, Meal = meal, Recipe = recipe, Servings = InitialServings(recipe, layout.PerMeal) });
+            }
+        }
+
+        return slots;
+    }
+
     // One distinct meal-set per BLOCK (Day = block index 1..numBlocks). With numBlocks == HorizonDays
     // (blockSize 1) this is the original per-day selection.
-    private static List<PlannedSlot> GreedySelect(
-        IReadOnlyList<Recipe> pool, DietIntent intent, double kcalTarget, int mealsPerDay, int numBlocks)
+    private static List<PlannedSlot> GreedySelect(IReadOnlyList<Recipe> pool, PlanLayout layout)
     {
-        var meals = AllMeals.Take(mealsPerDay).ToArray();
-        var perMeal = kcalTarget / mealsPerDay;
+        var meals = AllMeals.Take(layout.MealsPerDay).ToArray();
         var slots = new List<PlannedSlot>();
         var index = 0;
 
-        for (var block = 1; block <= numBlocks; block++)
+        for (var block = 1; block <= layout.NumBlocks; block++)
         {
             foreach (var meal in meals)
             {
                 var recipe = pool[index % pool.Count];
                 index++;
-                var raw = recipe.KcalPerServing > 0 ? perMeal / recipe.KcalPerServing : 1;
-                var servings = Math.Clamp(Math.Round(raw * 2, MidpointRounding.AwayFromZero) / 2, 0.5, 3.0); // nearest 0.5
-                slots.Add(new PlannedSlot { Day = block, Meal = meal, Recipe = recipe, Servings = servings });
+                slots.Add(new PlannedSlot { Day = block, Meal = meal, Recipe = recipe, Servings = InitialServings(recipe, layout.PerMeal) });
             }
         }
 
         return slots;
+    }
+
+    private static double InitialServings(Recipe recipe, double perMeal)
+    {
+        var raw = recipe.KcalPerServing > 0 ? perMeal / recipe.KcalPerServing : 1;
+        return Math.Clamp(Math.Round(raw * 2, MidpointRounding.AwayFromZero) / 2, 0.5, 3.0); // nearest 0.5
     }
 
     private static string Explain(Macros avg, double kcalTarget, DietIntent intent)

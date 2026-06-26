@@ -47,6 +47,19 @@ public sealed record ImportPreviewDto(
     bool ServingsAssumed,
     IReadOnlyList<string> Warnings);
 
+/// <summary>Outcome of an import preview (maps to 200 / 503 / 422).</summary>
+public enum ImportOutcome
+{
+    /// <summary>A draft was produced (deterministically from JSON-LD, or by the AI extractor).</summary>
+    Ok,
+    /// <summary>The only way to parse this input is the AI extractor, which isn't configured — 503.</summary>
+    NeedsExtractor,
+    /// <summary>Nothing recognizable to import (no structured data, no extractable text) — 422.</summary>
+    NotFound,
+}
+
+public sealed record ImportPreviewResult(ImportOutcome Outcome, ImportPreviewDto? Preview);
+
 public sealed record RecipeIngredientDto(
     string Name, double Quantity, string? Unit, double Grams, bool Resolved,
     double Kcal, double ProteinG, double FatG, double CarbG,

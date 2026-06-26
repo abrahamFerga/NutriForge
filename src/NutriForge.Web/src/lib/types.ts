@@ -166,6 +166,39 @@ export interface CreateDiaryEntryRequest {
   quantity: number;
 }
 
+/** A one-tap re-loggable food (recent or favorite). #69 */
+export interface QuickAddFood {
+  foodId: string;
+  foodName: string;
+  portionId: string | null;
+  portionName: string;
+  quantity: number;
+  kcal: number;
+  proteinG: number;
+}
+
+// ---- Meal templates (#70) ----
+
+/** One food in a saved meal, with its stored portion/quantity and computed per-item kcal. */
+export interface MealTemplateItem {
+  foodId: string;
+  foodName: string;
+  portionId: string | null;
+  portionName: string;
+  quantity: number;
+  kcal: number;
+  proteinG: number;
+}
+
+/** A reusable combination of foods the user can log in one tap. */
+export interface MealTemplate {
+  id: string;
+  name: string;
+  items: MealTemplateItem[];
+  kcal: number;
+  proteinG: number;
+}
+
 // ---- Photo food logging ----
 
 /** A food recognized in a meal photo: a trusted catalog match, or a flagged AI estimate. */
@@ -191,6 +224,58 @@ export interface TrendPoint {
   date: string;
   kcal: number;
   targetKcal: number;
+}
+
+// ---- Body measurements (#71) ----
+
+export interface Measurement {
+  date: string; // yyyy-MM-dd
+  weightKg: number;
+  bodyFatPct: number | null;
+  waistCm: number | null;
+}
+
+export interface LogMeasurementRequest {
+  date?: string;
+  weightKg: number;
+  bodyFatPct?: number | null;
+  waistCm?: number | null;
+}
+
+// ---- Consent / GDPR (#58) ----
+
+export type ConsentType =
+  | "TermsOfService"
+  | "PrivacyPolicy"
+  | "HealthDataProcessing"
+  | "Marketing";
+
+export type LawfulBasis =
+  | "Consent"
+  | "Contract"
+  | "LegalObligation"
+  | "VitalInterests"
+  | "PublicTask"
+  | "LegitimateInterests";
+
+export interface ConsentStatus {
+  type: ConsentType;
+  version: string;
+  required: boolean;
+  lawfulBasis: LawfulBasis;
+  description: string;
+  granted: boolean;
+  decidedVersion: string | null;
+  decidedAt: string | null;
+  needsAction: boolean;
+}
+
+// ---- Hydration (#72) ----
+
+export interface HydrationDay {
+  date: string; // yyyy-MM-dd
+  ml: number;
+  goalMl: number;
 }
 
 // ---- Natural-language parse ----
@@ -424,6 +509,59 @@ export interface DietPlanDto {
 
 export type DietSlug = "vegan" | "vegetarian" | "high-protein";
 
+/** A saved person the user regularly cooks for (#100), reused across every plan. */
+export interface HouseholdMember {
+  id: string;
+  name: string;
+  relationship: string | null;
+  /** Their daily kcal target; null means "same as me". */
+  targetKcal: number | null;
+}
+
+/** Create/update a saved household member. Omit targetKcal for "same as me". */
+export interface UpsertHouseholdMemberRequest {
+  name: string;
+  relationship?: string | null;
+  targetKcal?: number | null;
+}
+
+/** A saved diet-plan preset (#102) the user re-runs in one tap. */
+export interface DietTemplate {
+  id: string;
+  name: string;
+  dietSlug: string | null;
+  kcalTarget: number | null;
+  maxPrepMinutes: number | null;
+  mealsPerDay: number | null;
+  horizonDays: number;
+  blockSize: number;
+  desire: string | null;
+}
+
+/** Ask the AI to generate original recipes (#101). All fields optional. */
+export interface GenerateRecipesRequest {
+  count?: number;
+  mealType?: string | null;
+  dietSlug?: string | null;
+  targetKcal?: number | null;
+  maxPrepMinutes?: number | null;
+  exclude?: string[] | null;
+  cuisine?: string | null;
+  servings?: number | null;
+}
+
+/** Create/update a saved diet preset. */
+export interface UpsertDietTemplateRequest {
+  name: string;
+  dietSlug?: string | null;
+  kcalTarget?: number | null;
+  maxPrepMinutes?: number | null;
+  mealsPerDay?: number | null;
+  horizonDays?: number | null;
+  blockSize?: number | null;
+  desire?: string | null;
+}
+
 /** One additional person (the owner is added automatically). Omit targetKcal for "same as me". */
 export interface PlanMemberInput {
   name: string;
@@ -462,12 +600,16 @@ export interface ChannelSubscription {
   sendHourUtc: number;
   isLinked: boolean;
   address: string | null;
+  weeklySummaryEnabled: boolean;
+  reminderHourUtc: number | null;
 }
 
 export interface UpdateChannelSubscriptionRequest {
   channel: string;
   enabled: boolean;
   sendHourUtc: number;
+  weeklySummaryEnabled?: boolean;
+  reminderHourUtc?: number | null;
 }
 
 export interface LinkCode {

@@ -41,6 +41,20 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
             }
         }
 
+        // Web import (#91): same normalized source page (no video id) ⇒ return the existing visible recipe.
+        var sourceKey = Recipe.NormalizeSourceKey(request.SourceVideoId, request.SourceUrl);
+        if (sourceKey is not null)
+        {
+            var existing = await db.Recipes.AsNoTracking().Include(r => r.Ingredients)
+                .Where(r => r.SourceKey == sourceKey)
+                .OrderBy(r => r.OwnerUserId == null ? 0 : 1)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (existing is not null)
+            {
+                return existing.ToDto(currentUser.UserId);
+            }
+        }
+
         var recipe = await BuildRecipeAsync(new Recipe(), request, ct).ConfigureAwait(false);
         if (ownerUserId is { } owner)
         {
@@ -113,6 +127,28 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
     }
 
     /// <summary>
+    /// Bulk-remove the caller's AI-generated catalog recipes (#101) — a one-tap way to clear a recipe list
+    /// the user never wanted to curate. Only their OWN "Generate with AI" recipes are removed; global
+    /// (admin-curated) recipes and the hidden per-plan recipes are left intact. Returns how many were removed.
+    /// </summary>
+    public async Task<int> ClearAiGeneratedAsync(Guid ownerUserId, CancellationToken ct = default)
+    {
+        var toRemove = await db.Recipes.Include(r => r.Ingredients)
+            .Where(r => r.OwnerUserId == ownerUserId && r.SourceType == RecipeGenerationService.CatalogSource)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (toRemove.Count == 0)
+        {
+            return 0;
+        }
+
+        // Remove the owned ingredient rows explicitly (client-set keys), then the recipes.
+        db.RecipeIngredients.RemoveRange(toRemove.SelectMany(r => r.Ingredients));
+        db.Recipes.RemoveRange(toRemove);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return toRemove.Count;
+    }
+
+    /// <summary>
     /// Promote a recipe to GLOBAL (admin action — the endpoint enforces the role). Only operates on a
     /// recipe the admin can already see (their own or an existing global); promoting an already-global
     /// recipe is a no-op. Refuses (<see cref="RecipeWriteStatus.Conflict"/>) if a different global recipe
@@ -175,6 +211,7 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
         recipe.SourceType = request.SourceType;
         recipe.SourceVideoId = request.SourceVideoId;
         recipe.ThumbnailUrl = request.ThumbnailUrl;
+        recipe.SourceKey = Recipe.NormalizeSourceKey(request.SourceVideoId, request.SourceUrl);
 
         recipe.ClearIngredients();
         foreach (var line in request.Ingredients ?? [])
@@ -196,6 +233,14 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
                 {
                     ri.SetContribution(g, food.MacrosFor(g).Rounded());
                 }
+            }
+
+            // Fallback (#101): an ingredient the catalog doesn't carry resolves against the curated
+            // reference table (deterministic, never the LLM) so AI-generated / freely-imported recipes
+            // still compute their nutrition instead of being stuck at 0 kcal.
+            if (!ri.Resolved && NutritionReference.Resolve(line.Name, line.Quantity, line.Unit) is { } refHit)
+            {
+                ri.SetContribution(refHit.Grams, refHit.Macros);
             }
 
             recipe.AddIngredient(ri);
@@ -227,7 +272,9 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
 
     public async Task<IReadOnlyList<RecipeSummary>> ListAsync(string? query, CancellationToken ct = default)
     {
-        var q = db.Recipes.AsNoTracking();
+        // Hide per-plan generated recipes (#101) from the catalog browser — they belong to a specific diet
+        // plan, not the user's recipe collection. EF applies C# null-semantics, so null-source recipes stay.
+        var q = db.Recipes.AsNoTracking().Where(r => r.SourceType != RecipeGenerationService.PlanGeneratedSource);
         if (!string.IsNullOrWhiteSpace(query))
         {
             var term = query.Trim().ToLowerInvariant();

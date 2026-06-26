@@ -6,8 +6,10 @@ using NutriForge.Domain.Notifications;
 
 namespace NutriForge.Application.Notifications;
 
-public sealed record ChannelSubscriptionDto(string Channel, bool Enabled, int SendHourUtc, bool IsLinked, string? Address);
-public sealed record UpdateChannelSubscriptionRequest(string Channel, bool Enabled, int SendHourUtc);
+public sealed record ChannelSubscriptionDto(string Channel, bool Enabled, int SendHourUtc, bool IsLinked, string? Address,
+    bool WeeklySummaryEnabled = false, int? ReminderHourUtc = null);
+public sealed record UpdateChannelSubscriptionRequest(string Channel, bool Enabled, int SendHourUtc,
+    bool WeeklySummaryEnabled = false, int? ReminderHourUtc = null);
 public sealed record LinkCodeDto(string Code, DateTimeOffset ExpiresAt);
 public sealed record RedeemLinkRequest(string Code, string Address);
 public sealed record RedeemResultDto(bool Linked, string Channel);
@@ -19,7 +21,7 @@ public sealed record RedeemResultDto(bool Linked, string Channel);
 /// </summary>
 public sealed class ChannelSubscriptionService(IAppDbContext db, IClock clock)
 {
-    private static readonly string[] AllowedChannels = ["mock", "telegram"];
+    private static readonly string[] AllowedChannels = ["mock", "telegram", "twilio-whatsapp"];
     private static readonly TimeSpan CodeTtl = TimeSpan.FromMinutes(15);
 
     public async Task<ChannelSubscriptionDto> GetAsync(Guid userId, string channel, CancellationToken ct = default)
@@ -44,6 +46,8 @@ public sealed class ChannelSubscriptionService(IAppDbContext db, IClock clock)
 
         sub.Enabled = req.Enabled;
         sub.SendHourUtc = Math.Clamp(req.SendHourUtc, 0, 23);
+        sub.WeeklySummaryEnabled = req.WeeklySummaryEnabled;
+        sub.ReminderHourUtc = req.ReminderHourUtc is { } h ? Math.Clamp(h, 0, 23) : null;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return ToDto(sub, ch);
     }
@@ -129,5 +133,6 @@ public sealed class ChannelSubscriptionService(IAppDbContext db, IClock clock)
     private static ChannelSubscriptionDto ToDto(ChannelSubscription? sub, string channel) =>
         sub is null
             ? new ChannelSubscriptionDto(channel, false, 8, false, null)
-            : new ChannelSubscriptionDto(sub.Channel, sub.Enabled, sub.SendHourUtc, sub.IsLinked, sub.Address);
+            : new ChannelSubscriptionDto(sub.Channel, sub.Enabled, sub.SendHourUtc, sub.IsLinked, sub.Address,
+                sub.WeeklySummaryEnabled, sub.ReminderHourUtc);
 }

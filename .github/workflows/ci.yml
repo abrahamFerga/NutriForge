@@ -48,12 +48,44 @@ jobs:
           --no-build
           --logger "trx;LogFileName=test-results.trx"
           --collect "XPlat Code Coverage"
+          --settings coverage.runsettings
+
+      - name: Merge coverage reports
+        if: always()
+        run: |
+          dotnet tool install --global dotnet-coverage
+          dotnet-coverage merge -f cobertura -o coverage-merged.xml **/TestResults/**/coverage.cobertura.xml
+
+      - name: Enforce 55% coverage gate (Application + Domain packages)
+        # Check coverage of the two business-logic layers measured by Application.Tests.
+        # Infrastructure is excluded because it is covered by integration / E2E tests that
+        # run out-of-process and do not contribute to Coverlet's instrumented measurement.
+        if: always()
+        run: |
+          APPXML=$(find tests/NutriForge.Application.Tests/TestResults -name "coverage.cobertura.xml" | head -1)
+          python3 - "$APPXML" << 'PYEOF'
+          import sys, xml.etree.ElementTree as ET
+          xml_path = sys.argv[1]
+          tree = ET.parse(xml_path)
+          checked = {"NutriForge.Application", "NutriForge.Domain"}
+          failed = []
+          for pkg in tree.getroot().findall(".//package"):
+              name = pkg.get("name", "")
+              if name in checked:
+                  rate = float(pkg.get("line-rate", 0)) * 100
+                  print(f"{name}: {rate:.1f}%")
+                  if rate < 55:
+                      failed.append(f"{name} ({rate:.1f}% < 55%)")
+          if failed:
+              print("Coverage gate failed:", ", ".join(failed), file=sys.stderr)
+              sys.exit(1)
+          PYEOF
 
       - name: Coverage report
         if: always()
         uses: danielpalme/ReportGenerator-GitHub-Action@5.3.11
         with:
-          reports: "**/TestResults/**/coverage.cobertura.xml"
+          reports: "coverage-merged.xml"
           targetdir: coverage-report
           reporttypes: "HtmlInline;MarkdownSummaryGithub"
 
@@ -157,3 +189,37 @@ jobs:
         env:
           E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
         run: npx playwright test
+
+  mutation:
+    name: Stryker mutation score (Domain math)
+    # Mutation tests are slow (~3–5 min); run on push to main and weekly but not
+    # every PR to keep feedback loops tight. The break threshold (50%) is enforced.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (pinned by global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Install Stryker.NET
+        run: dotnet tool install --global dotnet-stryker
+
+      - name: Run mutation tests (Domain math)
+        # stryker-config.json targets NutriForge.Domain + Domain.Tests.
+        # Exit code is non-zero when mutation score < thresholds.break (50%).
+        run: dotnet stryker
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: mutation-report/
+          if-no-files-found: ignore

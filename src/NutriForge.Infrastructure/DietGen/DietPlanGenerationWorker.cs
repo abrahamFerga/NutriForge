@@ -107,7 +107,7 @@ public sealed partial class DietPlanGenerationWorker(
             // owner's own. Without this a user's private recipe could leak into another user's plan.
             var visible = recipes.Where(r => r.OwnerUserId is null || r.OwnerUserId == plan.UserId).ToList();
             var pool = RecipeFilter.Filter(visible, intent, diet);
-            var result = generator.Generate(pool, intent, plan.TargetKcal);
+            var result = await generator.GenerateAsync(pool, intent, plan.TargetKcal, ct).ConfigureAwait(false);
 
             plan.ClearSlots();
             foreach (var s in result.Slots)

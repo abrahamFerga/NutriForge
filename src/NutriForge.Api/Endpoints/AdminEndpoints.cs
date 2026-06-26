@@ -1,4 +1,5 @@
 using NutriForge.Application.Authorization;
+using NutriForge.Application.Connectors;
 
 namespace NutriForge.Api.Endpoints;
 
@@ -15,16 +16,12 @@ public static class AdminEndpoints
         var group = app.MapGroup("/internal/import")
             .RequireAuthorization(Policies.AdminOnly).WithTags("Admin");
 
-        // Connector registry status. The runtime importers land with Epics 2 & 4; this exposes
-        // the registry so operators can see what's installed and its last-run state.
-        group.MapGet("/status", () => Results.Ok(new
-        {
-            connectors = new[]
-            {
-                new { name = "USDA FoodData Central", direction = "outbound", installed = true, lastRun = (DateTimeOffset?)null },
-                new { name = "Open Food Facts", direction = "outbound", installed = false, lastRun = (DateTimeOffset?)null },
-            },
-        })).WithName("ImportStatus");
+        // Connector registry status — the installed outbound connectors, whether configuration enables
+        // each, and the last run of the batch importers (#14). Read straight from the registry so the
+        // list stays config-driven rather than hand-maintained here.
+        group.MapGet("/status", async (IConnectorRegistry registry, CancellationToken ct) =>
+            Results.Ok(new { connectors = await registry.GetStatusAsync(ct).ConfigureAwait(false) }))
+            .WithName("ImportStatus");
 
         return app;
     }

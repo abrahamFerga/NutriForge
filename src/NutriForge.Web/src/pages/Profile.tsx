@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { CheckCircle2, ChevronDown, User } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeading } from "@/components/PageHeading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,11 +10,11 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, LoadingState } from "@/components/StateMessage";
 import { NotificationsPanel } from "@/components/NotificationsPanel";
+import { ConsentPanel } from "@/components/ConsentPanel";
 import { useProfile, useSaveProfile } from "@/hooks/useQueries";
 import {
   ACTIVITY_LEVELS,
   GOALS,
-  MACRO_STRATEGIES,
   SEXES,
   type ActivityLevel,
   type Goal,
@@ -21,6 +23,7 @@ import {
   type Sex,
   type UpdateProfileRequest,
 } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 interface FormState {
   sex: Sex;
@@ -82,22 +85,19 @@ const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
 };
 
 const GOAL_LABELS: Record<Goal, string> = {
-  AggressiveCut: "Aggressive cut",
-  ModerateCut: "Moderate cut",
-  Maintain: "Maintain",
-  LeanBulk: "Lean bulk",
-  Bulk: "Bulk",
-};
-
-const STRATEGY_LABELS: Record<MacroStrategy, string> = {
-  ProteinAnchored: "Protein anchored",
-  Percentage: "Percentage",
+  AggressiveCut: "Lose weight fast",
+  ModerateCut: "Lose weight",
+  Maintain: "Maintain weight",
+  LeanBulk: "Gain muscle",
+  Bulk: "Gain weight",
 };
 
 export function Profile() {
   const profileQuery = useProfile();
   const save = useSaveProfile();
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Prefill once the profile resolves.
   useEffect(() => {
@@ -134,17 +134,17 @@ export function Profile() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Profile</h1>
-        <p className="text-sm text-slate-400">
-          Your details drive calorie and macro targets.
-        </p>
-      </div>
+      <PageHeading
+        title="Profile"
+        subtitle="The basics — these set your daily calorie and protein goals."
+        icon={User}
+      />
 
       <form onSubmit={submit} className="space-y-6">
+        {/* The essentials — everything needed to compute a target. */}
         <Card>
           <CardHeader>
-            <CardTitle>Body &amp; activity</CardTitle>
+            <CardTitle>About you</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <Field label="Sex">
@@ -193,19 +193,7 @@ export function Profile() {
               />
             </Field>
 
-            <Field label="Body fat % (optional)">
-              <Input
-                type="number"
-                min={1}
-                max={75}
-                step={0.1}
-                value={form.bodyFatPct}
-                onChange={(e) => set("bodyFatPct", e.target.value)}
-                placeholder="—"
-              />
-            </Field>
-
-            <Field label="Activity level">
+            <Field label="How active are you?">
               <Select
                 value={form.activity}
                 onChange={(e) =>
@@ -219,15 +207,8 @@ export function Profile() {
                 ))}
               </Select>
             </Field>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Goal &amp; macros</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <Field label="Goal">
+            <Field label="What's your goal?">
               <Select
                 value={form.goal}
                 onChange={(e) => set("goal", e.target.value as Goal)}
@@ -239,70 +220,99 @@ export function Profile() {
                 ))}
               </Select>
             </Field>
-
-            <Field label="Macro strategy">
-              <Select
-                value={form.macroStrategy}
-                onChange={(e) =>
-                  set("macroStrategy", e.target.value as MacroStrategy)
-                }
-              >
-                {MACRO_STRATEGIES.map((m) => (
-                  <option key={m} value={m}>
-                    {STRATEGY_LABELS[m]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Preferences</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Field label="Allergens (comma separated)">
+        {save.isError ? <ErrorState error={save.error} /> : null}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="submit" disabled={save.isPending}>
+            {save.isPending ? <Spinner /> : null}
+            Save profile
+          </Button>
+          {save.isSuccess ? (
+            <>
+              <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                Saved — targets recomputed
+              </span>
+              <Link to="/" className="text-sm font-medium text-brand-400 hover:text-brand-300">
+                View your targets →
+              </Link>
+            </>
+          ) : null}
+        </div>
+
+        {/* Food preferences — most people never touch these. */}
+        <Disclosure
+          open={prefsOpen}
+          onToggle={() => setPrefsOpen((v) => !v)}
+          label="Allergens & food preferences"
+        >
+          <div className="mt-3 space-y-4">
+            <Field label="Allergens">
               <Input
                 value={form.allergens}
                 onChange={(e) => set("allergens", e.target.value)}
                 placeholder="peanuts, shellfish"
               />
             </Field>
-            <Field label="Dislikes (comma separated)">
+            <Field label="Dislikes">
               <Input
                 value={form.dislikes}
                 onChange={(e) => set("dislikes", e.target.value)}
                 placeholder="cilantro, liver"
               />
             </Field>
-            <Field label="Preferred diets (comma separated)">
+            <Field label="Preferred diets">
               <Input
                 value={form.preferredDiets}
                 onChange={(e) => set("preferredDiets", e.target.value)}
                 placeholder="high-protein, mediterranean"
               />
             </Field>
-          </CardContent>
-        </Card>
-
-        {save.isError ? <ErrorState error={save.error} /> : null}
-
-        <div className="flex items-center gap-3">
-          <Button type="submit" disabled={save.isPending}>
-            {save.isPending ? <Spinner /> : null}
-            Save profile
-          </Button>
-          {save.isSuccess ? (
-            <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-              <CheckCircle2 className="h-4 w-4" />
-              Saved — targets recomputed
-            </span>
-          ) : null}
-        </div>
+          </div>
+        </Disclosure>
       </form>
 
-      <NotificationsPanel />
+      {/* Account-level settings, out of the way. */}
+      <Disclosure
+        open={settingsOpen}
+        onToggle={() => setSettingsOpen((v) => !v)}
+        label="Notifications & privacy"
+      >
+        <div className="mt-4 space-y-6">
+          <NotificationsPanel />
+          <ConsentPanel />
+        </div>
+      </Disclosure>
+    </div>
+  );
+}
+
+function Disclosure({
+  open,
+  onToggle,
+  label,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-t border-slate-800 pt-3">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between text-sm font-medium text-slate-300 hover:text-slate-100"
+        aria-expanded={open}
+      >
+        {label}
+        <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
+      </button>
+      {open ? children : null}
     </div>
   );
 }

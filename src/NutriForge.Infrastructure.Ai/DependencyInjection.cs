@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using NutriForge.Application.Observability;
 using NutriForge.Infrastructure.Ai.Assistant;
 
 namespace NutriForge.Infrastructure.Ai;
@@ -21,7 +22,11 @@ public static class DependencyInjection
         builder.Services.AddScoped<NutriForge.Application.Abstractions.INlDiaryParser, Assistant.NlDiaryParser>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IFoodPhotoParser, Assistant.FoodPhotoParser>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IRecipeExtractor, Assistant.RecipeExtractor>();
+        // Recipe-generation agent (#101) — writes full recipes from a brief; nutrition resolved by the catalog/reference.
+        builder.Services.AddScoped<NutriForge.Application.Abstractions.IRecipeGenAgent, Assistant.RecipeGenAgent>();
         builder.Services.AddScoped<NutriForge.Application.Abstractions.IDietIntentParser, Assistant.DietIntentParser>();
+        // SELECT agent (#36) — when present, the diet generator lets it compose the meal selection.
+        builder.Services.AddScoped<NutriForge.Application.DietGen.IMealSelectAgent, Assistant.MealSelectAgent>();
 
         return builder;
     }

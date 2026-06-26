@@ -24,6 +24,24 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
     }
 
+    /// <summary>Every response carries the defense-in-depth security headers (#57).</summary>
+    [Fact]
+    public async Task Responses_carry_security_headers()
+    {
+        var client = fixture.App.CreateHttpClient("api");
+        using var res = await client.GetAsync("/"); // anonymous root
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("nosniff", HeaderValue(res, "X-Content-Type-Options"));
+        Assert.Equal("DENY", HeaderValue(res, "X-Frame-Options"));
+        Assert.Equal("no-referrer", HeaderValue(res, "Referrer-Policy"));
+        Assert.Contains("default-src 'none'", HeaderValue(res, "Content-Security-Policy"));
+        Assert.False(res.Headers.Contains("X-Powered-By"));
+
+        static string HeaderValue(HttpResponseMessage res, string name) =>
+            res.Headers.TryGetValues(name, out var values) ? values.Single() : "";
+    }
+
     [Fact]
     public async Task Full_calorie_tracking_flow_works_end_to_end()
     {
@@ -126,6 +144,27 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         var admin = await fixture.CreateReadyClientAsync(subject: $"admin-{Guid.NewGuid():N}", role: "admin");
         using var ok = await admin.GetAsync("/internal/import/status");
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+    }
+
+    /// <summary>#14: the admin registry lists the installed connectors, each with a config-derived
+    /// "configured" flag and a (here never-run) last-run status.</summary>
+    [Fact]
+    public async Task Connector_registry_lists_installed_connectors_with_configured_and_last_run()
+    {
+        var admin = await fixture.CreateReadyClientAsync(subject: $"admin-{Guid.NewGuid():N}", role: "admin");
+        var status = await admin.GetFromJsonAsync<JsonElement>("/internal/import/status", Json);
+
+        var connectors = status.GetProperty("connectors").EnumerateArray().ToList();
+        Assert.NotEmpty(connectors);
+
+        // Open Food Facts needs no key → always configured.
+        var off = connectors.Single(c => c.GetProperty("key").GetString() == "open-food-facts");
+        Assert.True(off.GetProperty("configured").GetBoolean());
+
+        // USDA needs a data directory, which the test host doesn't set → not configured, and never run.
+        var usda = connectors.Single(c => c.GetProperty("key").GetString() == "usda-fdc");
+        Assert.False(usda.GetProperty("configured").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, usda.GetProperty("lastRun").ValueKind);
     }
 
     [Fact]
@@ -407,7 +446,7 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4)); // PDF magic number
     }
 
-    /// <summary>Recipe import is wired and degrades to 503 when no AI provider is configured.</summary>
+    /// <summary>A YouTube import still needs the AI extractor (the description is messy text) — 503 without it.</summary>
     [Fact]
     public async Task Recipe_import_preview_degrades_to_503_without_a_provider()
     {
@@ -415,6 +454,33 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         using var res = await client.PostAsJsonAsync("/api/v1/recipes/import/preview",
             new { url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }, Json);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
+    }
+
+    /// <summary>
+    /// Web recipe import via schema.org JSON-LD (#91) is deterministic — pasted recipe HTML produces a
+    /// draft with computed nutrition WITHOUT any AI provider configured.
+    /// </summary>
+    [Fact]
+    public async Task Recipe_import_from_pasted_json_ld_html_works_without_an_ai_provider()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"jsonld-{Guid.NewGuid():N}");
+        const string html =
+            "<html><head><script type=\"application/ld+json\">" +
+            "{\"@context\":\"https://schema.org\",\"@type\":\"Recipe\",\"name\":\"JSON-LD Bowl\"," +
+            "\"recipeYield\":\"2\",\"totalTime\":\"PT15M\"," +
+            "\"recipeIngredient\":[\"200 g chicken\",\"150 g white rice\"]," +
+            "\"recipeInstructions\":\"Cook it.\"}</script></head><body></body></html>";
+
+        using var res = await client.PostAsJsonAsync("/api/v1/recipes/import/preview", new { text = html }, Json);
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode); // deterministic path — no AI needed
+        var preview = await res.Content.ReadFromJsonAsync<JsonElement>(Json);
+        var draft = preview.GetProperty("draft");
+        Assert.Equal("JSON-LD Bowl", draft.GetProperty("name").GetString());
+        Assert.Equal(2, draft.GetProperty("servings").GetInt32());
+        Assert.True(draft.GetProperty("ingredients").GetArrayLength() >= 2);
+        // chicken + white rice resolve against the seeded catalog ⇒ computed per-serving nutrition.
+        Assert.True(draft.GetProperty("kcalPerServing").GetDouble() > 0, "expected computed nutrition from resolved ingredients");
     }
 
     /// <summary>An imported recipe persists its source fields, and re-importing the same video dedups.</summary>
@@ -450,6 +516,324 @@ public sealed class CalorieTrackingFlowTests(AppHostFixture fixture)
         Assert.Equal(HttpStatusCode.Created, second.StatusCode);
         var created2 = await second.Content.ReadFromJsonAsync<JsonElement>(Json);
         Assert.Equal(id1, created2.GetProperty("id").GetString());
+    }
+
+    /// <summary>Re-importing the same web recipe URL (#91) returns the existing recipe, not a duplicate.</summary>
+    [Fact]
+    public async Task Re_importing_the_same_web_recipe_url_dedups_by_normalized_source_key()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"webdedup-{Guid.NewGuid():N}");
+        var url = $"https://recipes.example.com/{Guid.NewGuid():N}";
+
+        object body = new
+        {
+            name = "Web recipe",
+            servings = 2,
+            totalMinutes = 10,
+            instructions = "mix",
+            tags = new[] { "test" },
+            ingredients = new[] { new { quantity = 100.0, unit = "g", name = "egg" } },
+            sourceUrl = url,
+            sourceType = "web",
+        };
+        using var first = await client.PostAsJsonAsync("/api/v1/recipes", body, Json);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var id1 = (await first.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetString();
+
+        // Same page, different case + trailing slash ⇒ the SAME recipe (normalized dedup), not a second row.
+        object body2 = new
+        {
+            name = "A different title",
+            servings = 4,
+            totalMinutes = 5,
+            instructions = "x",
+            tags = new[] { "t" },
+            ingredients = new[] { new { quantity = 50.0, unit = "g", name = "egg" } },
+            sourceUrl = url.ToUpperInvariant() + "/",
+            sourceType = "web",
+        };
+        using var second = await client.PostAsJsonAsync("/api/v1/recipes", body2, Json);
+        Assert.Equal(HttpStatusCode.Created, second.StatusCode);
+        var created2 = await second.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal(id1, created2.GetProperty("id").GetString());
+        Assert.Equal("Web recipe", created2.GetProperty("name").GetString()); // the first recipe, returned as-is
+    }
+
+    /// <summary>Body-measurement tracking (#71): log/upsert per day, history is oldest-first, owner-isolated.</summary>
+    [Fact]
+    public async Task Body_measurements_log_upsert_history_and_isolation()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"weight-{Guid.NewGuid():N}");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var yesterday = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        using (var r = await client.PostAsJsonAsync("/api/v1/measurements", new { date = yesterday, weightKg = 81.0, bodyFatPct = 18.0 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        using (var r = await client.PostAsJsonAsync("/api/v1/measurements", new { date = today, weightKg = 80.5 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        var history = await client.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json);
+        Assert.Equal(2, history.GetArrayLength());
+        Assert.Equal(81.0, history[0].GetProperty("weightKg").GetDouble());  // oldest first
+        Assert.Equal(80.5, history[1].GetProperty("weightKg").GetDouble());
+
+        // Re-log today ⇒ UPSERT (still two entries, the value updated).
+        using (var r = await client.PostAsJsonAsync("/api/v1/measurements", new { date = today, weightKg = 80.0 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        var afterReLog = await client.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json);
+        Assert.Equal(2, afterReLog.GetArrayLength());
+        Assert.Equal(80.0, afterReLog[1].GetProperty("weightKg").GetDouble());
+
+        // A non-positive weight is rejected.
+        using (var bad = await client.PostAsJsonAsync("/api/v1/measurements", new { weightKg = 0.0 }, Json))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        }
+
+        // Delete a day.
+        using (var del = await client.DeleteAsync($"/api/v1/measurements/{today}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        Assert.Equal(1, (await client.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json)).GetArrayLength());
+
+        // Owner isolation: a different user sees none of it.
+        var other = await fixture.CreateReadyClientAsync(subject: $"weight-other-{Guid.NewGuid():N}");
+        Assert.Equal(0, (await other.GetFromJsonAsync<JsonElement>("/api/v1/measurements?days=30", Json)).GetArrayLength());
+    }
+
+    /// <summary>Quick-add (#69): recents, favorites (add/list/remove), and a server-side copy-day.</summary>
+    [Fact]
+    public async Task Quick_add_recents_favorites_and_copy_day()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"quick-{Guid.NewGuid():N}");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var todayStr = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var yStr = today.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var foods = await client.GetFromJsonAsync<JsonElement>("/api/v1/foods/search?q=egg", Json);
+        var egg = foods[0];
+        var foodId = egg.GetProperty("id").GetString();
+        var portionId = egg.GetProperty("portions").EnumerateArray().First().GetProperty("id").GetString();
+
+        // Log the egg yesterday.
+        using (var log = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diary")
+        {
+            Content = JsonContent.Create(new { date = yStr, mealSlot = "Breakfast", foodId, portionId, quantity = 2.0 }, options: Json),
+        })
+        {
+            log.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(log);
+            Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+        }
+
+        // Recents include it.
+        var recents = await client.GetFromJsonAsync<JsonElement>("/api/v1/diary/recents?limit=10", Json);
+        Assert.Contains(recents.EnumerateArray(), f => f.GetProperty("foodId").GetString() == foodId);
+
+        // Favorite it → it appears in favorites; favoriting an unknown food is 404.
+        using (var fav = await Post(client, $"/api/v1/favorites/{foodId}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, fav.StatusCode);
+        }
+
+        var favorites = await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json);
+        Assert.Contains(favorites.EnumerateArray(), f => f.GetProperty("foodId").GetString() == foodId);
+
+        using (var bad = await Post(client, $"/api/v1/favorites/{Guid.NewGuid()}"))
+        {
+            Assert.Equal(HttpStatusCode.NotFound, bad.StatusCode);
+        }
+
+        // Copy yesterday → today.
+        using (var copy = new HttpRequestMessage(HttpMethod.Post, "/api/v1/diary/copy")
+        {
+            Content = JsonContent.Create(new { from = yStr, to = todayStr }, options: Json),
+        })
+        {
+            copy.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(copy);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(1, (await r.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("copied").GetInt32());
+        }
+
+        var day = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diary?date={todayStr}", Json);
+        Assert.Equal(1, day.GetProperty("entries").GetArrayLength());
+
+        // Unfavorite.
+        using (var del = await client.DeleteAsync($"/api/v1/favorites/{foodId}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        Assert.Equal(0, (await client.GetFromJsonAsync<JsonElement>("/api/v1/favorites", Json)).GetArrayLength());
+    }
+
+    /// <summary>Consent (#58): capture, withdraw, and surface it in the GDPR export — against real Postgres.</summary>
+    [Fact]
+    public async Task Consent_is_captured_withdrawn_and_surfaced_in_the_export()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"consent-{Guid.NewGuid():N}");
+
+        // Fresh user: required consents need action, marketing does not.
+        var initial = await client.GetFromJsonAsync<JsonElement>("/api/v1/me/consent", Json);
+        Assert.Contains(initial.EnumerateArray(), c =>
+            c.GetProperty("type").GetString() == "PrivacyPolicy" && c.GetProperty("needsAction").GetBoolean());
+        Assert.Contains(initial.EnumerateArray(), c =>
+            c.GetProperty("type").GetString() == "Marketing" && !c.GetProperty("needsAction").GetBoolean());
+
+        // Grant the three required consents.
+        foreach (var type in new[] { "TermsOfService", "PrivacyPolicy", "HealthDataProcessing" })
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me/consent")
+            {
+                Content = JsonContent.Create(new { type, granted = true }, options: Json),
+            };
+            req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        }
+
+        var afterGrant = await client.GetFromJsonAsync<JsonElement>("/api/v1/me/consent", Json);
+        Assert.DoesNotContain(afterGrant.EnumerateArray(), c => c.GetProperty("needsAction").GetBoolean());
+
+        // Withdraw one → it reopens.
+        using (var withdraw = new HttpRequestMessage(HttpMethod.Post, "/api/v1/me/consent/PrivacyPolicy/withdraw"))
+        {
+            withdraw.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(withdraw);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            var status = await r.Content.ReadFromJsonAsync<JsonElement>(Json);
+            Assert.Contains(status.EnumerateArray(), c =>
+                c.GetProperty("type").GetString() == "PrivacyPolicy"
+                && !c.GetProperty("granted").GetBoolean()
+                && c.GetProperty("needsAction").GetBoolean());
+        }
+
+        // The full trail (grant + withdraw for PrivacyPolicy = 2 rows) rides the Art. 20 export.
+        var export = await client.GetFromJsonAsync<JsonElement>("/api/v1/me/export", Json);
+        var consent = export.GetProperty("consent").EnumerateArray().ToList();
+        Assert.Equal(2, consent.Count(c => c.GetProperty("type").GetString() == "PrivacyPolicy"));
+        Assert.Contains(consent, c => c.GetProperty("lawfulBasis").GetString() == "Contract"); // ToS
+    }
+
+    /// <summary>Hydration (#72): accumulate water, undo, set a goal — against real Postgres.</summary>
+    [Fact]
+    public async Task Hydration_accumulates_and_tracks_a_goal()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"hydro-{Guid.NewGuid():N}");
+
+        // Fresh user: zero ml at the default goal.
+        var start = await client.GetFromJsonAsync<JsonElement>("/api/v1/hydration", Json);
+        Assert.Equal(0, start.GetProperty("ml").GetInt32());
+        Assert.Equal(2500, start.GetProperty("goalMl").GetInt32());
+
+        // Add 250 + 500 → 750.
+        await PostHydration(client, "/api/v1/hydration", new { ml = 250 });
+        var after = await PostHydration(client, "/api/v1/hydration", new { ml = 500 });
+        Assert.Equal(750, after.GetProperty("ml").GetInt32());
+
+        // Set a goal → it sticks and is reflected in GET.
+        using (var goal = new HttpRequestMessage(HttpMethod.Put, "/api/v1/hydration/goal")
+        {
+            Content = JsonContent.Create(new { goalMl = 3000 }, options: Json),
+        })
+        {
+            goal.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(goal);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(3000, (await r.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("goalMl").GetInt32());
+        }
+
+        var now = await client.GetFromJsonAsync<JsonElement>("/api/v1/hydration", Json);
+        Assert.Equal(750, now.GetProperty("ml").GetInt32());
+        Assert.Equal(3000, now.GetProperty("goalMl").GetInt32());
+
+        // A big undo clamps at zero.
+        var cleared = await PostHydration(client, "/api/v1/hydration", new { ml = -5000 });
+        Assert.Equal(0, cleared.GetProperty("ml").GetInt32());
+    }
+
+    private static async Task<JsonElement> PostHydration(HttpClient client, string path, object body)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body, options: Json) };
+        req.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+        using var r = await client.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        return await r.Content.ReadFromJsonAsync<JsonElement>(Json);
+    }
+
+    /// <summary>Meal templates (#70): create a saved meal, log it in one tap, then delete it.</summary>
+    [Fact]
+    public async Task Meal_template_saves_a_combination_of_foods_and_logs_it_in_one_tap()
+    {
+        var client = await fixture.CreateReadyClientAsync(subject: $"tmpl-{Guid.NewGuid():N}");
+        var today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        var foods = await client.GetFromJsonAsync<JsonElement>("/api/v1/foods/search?q=egg", Json);
+        var egg = foods[0];
+        var foodId = egg.GetProperty("id").GetString();
+        var portionId = egg.GetProperty("portions").EnumerateArray().First().GetProperty("id").GetString();
+
+        // Create a saved meal of two items.
+        string templateId;
+        using (var create = new HttpRequestMessage(HttpMethod.Post, "/api/v1/meal-templates")
+        {
+            Content = JsonContent.Create(new
+            {
+                name = "Usual breakfast",
+                items = new[]
+                {
+                    new { foodId, portionId, quantity = 2.0 },
+                    new { foodId, portionId = (string?)null, quantity = 30.0 },
+                },
+            }, options: Json),
+        })
+        {
+            create.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(create);
+            Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+            var dto = await r.Content.ReadFromJsonAsync<JsonElement>(Json);
+            templateId = dto.GetProperty("id").GetString()!;
+            Assert.Equal(2, dto.GetProperty("items").GetArrayLength());
+        }
+
+        // It's listed.
+        var list = await client.GetFromJsonAsync<JsonElement>("/api/v1/meal-templates", Json);
+        Assert.Contains(list.EnumerateArray(), t => t.GetProperty("id").GetString() == templateId);
+
+        // One-tap log into today's lunch → two diary entries.
+        using (var log = new HttpRequestMessage(HttpMethod.Post, $"/api/v1/meal-templates/{templateId}/log")
+        {
+            Content = JsonContent.Create(new { date = today, mealSlot = "Lunch" }, options: Json),
+        })
+        {
+            log.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+            using var r = await client.SendAsync(log);
+            Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+            Assert.Equal(2, (await r.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("logged").GetInt32());
+        }
+
+        var day = await client.GetFromJsonAsync<JsonElement>($"/api/v1/diary?date={today}", Json);
+        Assert.Equal(2, day.GetProperty("entries").EnumerateArray().Count(e => e.GetProperty("mealSlot").GetString() == "Lunch"));
+
+        // Delete it.
+        using (var del = await client.DeleteAsync($"/api/v1/meal-templates/{templateId}"))
+        {
+            Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        }
+
+        var after = await client.GetFromJsonAsync<JsonElement>("/api/v1/meal-templates", Json);
+        Assert.DoesNotContain(after.EnumerateArray(), t => t.GetProperty("id").GetString() == templateId);
     }
 
     /// <summary>Photo logging is wired and degrades to 503 when no vision provider is configured.</summary>

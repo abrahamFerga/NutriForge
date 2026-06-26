@@ -13,10 +13,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Flame } from "lucide-react";
+import { Flame, LayoutDashboard, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
+import { PageHeading } from "@/components/PageHeading";
 import { MacroBar } from "@/components/MacroBar";
+import { WeightCard } from "@/components/WeightCard";
+import { HydrationCard } from "@/components/HydrationCard";
 import {
   EmptyState,
   ErrorState,
@@ -72,11 +75,33 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeading title="Dashboard" subtitle="Today at a glance" />
+      <PageHeading
+        title="Dashboard"
+        subtitle="Today at a glance"
+        icon={LayoutDashboard}
+        action={
+          <Link to="/diary" className={buttonClasses("primary", "md")}>
+            <Plus className="h-4 w-4" />
+            Log food
+          </Link>
+        }
+      />
+
+      {kcalConsumed === 0 ? (
+        <Link
+          to="/diary"
+          className="nf-card nf-hover flex items-center justify-between gap-3 px-4 py-3 text-sm"
+        >
+          <span className="text-slate-300">
+            Nothing logged yet today — add your first meal.
+          </span>
+          <span className="font-medium text-brand-400">Log food →</span>
+        </Link>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Calorie ring */}
-        <Card className="lg:col-span-1">
+        <Card className="nf-hover lg:col-span-1">
           <CardHeader>
             <CardTitle>Calories</CardTitle>
           </CardHeader>
@@ -98,7 +123,7 @@ export function Dashboard() {
                   <RadialBar
                     dataKey="value"
                     cornerRadius={12}
-                    background={{ fill: "#1e293b" }}
+                    background={{ fill: "var(--nf-surface-2)" }}
                   />
                 </RadialBarChart>
               </ResponsiveContainer>
@@ -119,7 +144,7 @@ export function Dashboard() {
         </Card>
 
         {/* Macro bars */}
-        <Card className="lg:col-span-2">
+        <Card className="nf-hover lg:col-span-2">
           <CardHeader>
             <CardTitle>Macros</CardTitle>
           </CardHeader>
@@ -142,9 +167,6 @@ export function Dashboard() {
               target={target.carbG}
               colorClass="bg-sky-400"
             />
-            <p className="pt-1 text-xs text-slate-500">
-              Targets via {target.formula}
-            </p>
           </CardContent>
         </Card>
       </div>
@@ -174,6 +196,11 @@ export function Dashboard() {
           )}
         </CardContent>
       </Card>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <WeightCard />
+        <HydrationCard />
+      </div>
     </div>
   );
 }
@@ -239,17 +266,3 @@ function TrendChart({ data }: { data: TrendDatum[] }) {
   );
 }
 
-function PageHeading({
-  title,
-  subtitle,
-}: {
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-slate-100">{title}</h1>
-      {subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}
-    </div>
-  );
-}

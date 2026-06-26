@@ -23,6 +23,14 @@ public static class AssistantEndpoints
             Results.Ok(new { configured = svc.IsConfigured }))
             .WithName("AssistantStatus");
 
+        // Monthly token usage for the authenticated user.
+        group.MapGet("/usage", async (NutritionAssistantService svc, CancellationToken ct) =>
+        {
+            var (used, budgetK) = await svc.GetUsageAsync(ct);
+            return Results.Ok(new { tokensUsedThisMonth = used, monthlyBudgetK = budgetK });
+        })
+            .WithName("AssistantUsage");
+
         // One conversational turn. Returns the reply and an optional diary-log proposal the user
         // confirms via the normal diary endpoint (the agent never writes the diary itself).
         group.MapPost("/chat", async (ChatRequest req, NutritionAssistantService svc, CancellationToken ct) =>
@@ -32,8 +40,18 @@ public static class AssistantEndpoints
                 return InvalidMessage();
             }
 
-            var turn = await svc.ChatAsync(message, ct);
-            return Results.Ok(new { reply = turn.Reply, proposal = turn.Proposal });
+            try
+            {
+                var turn = await svc.ChatAsync(message, ct);
+                return Results.Ok(new { reply = turn.Reply, proposal = turn.Proposal });
+            }
+            catch (TokenBudgetExceededException ex)
+            {
+                return Results.Problem(
+                    title: "Monthly AI budget exceeded",
+                    detail: $"You have used {ex.Used:N0} of your {ex.Budget:N0} monthly token budget. It resets on the 1st.",
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("AssistantChat");
@@ -50,6 +68,19 @@ public static class AssistantEndpoints
             if (!IsValid(req, out var message))
             {
                 return InvalidMessage();
+            }
+
+            // Assert budget BEFORE writing SSE headers so we can still return a 429.
+            try
+            {
+                await svc.AssertBudgetAsync(message, ct);
+            }
+            catch (TokenBudgetExceededException ex)
+            {
+                return Results.Problem(
+                    title: "Monthly AI budget exceeded",
+                    detail: $"You have used {ex.Used:N0} of your {ex.Budget:N0} monthly token budget. It resets on the 1st.",
+                    statusCode: StatusCodes.Status429TooManyRequests);
             }
 
             http.Response.ContentType = "text/event-stream";
@@ -72,13 +103,21 @@ public static class AssistantEndpoints
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("AssistantChatStream");
 
-        // Clear the persisted conversation.
+        // Clear the persisted conversation history (PersonalContext is preserved — #77).
         group.MapDelete("/session", async (NutritionAssistantService svc, CancellationToken ct) =>
         {
             await svc.ClearAsync(ct);
             return Results.NoContent();
         })
             .WithName("ClearAssistantSession");
+
+        // Clear the user's persisted personal memory independently of the conversation (#77).
+        group.MapDelete("/memory", async (NutritionAssistantService svc, CancellationToken ct) =>
+        {
+            await svc.ClearPersonalContextAsync(ct);
+            return Results.NoContent();
+        })
+            .WithName("ClearAssistantMemory");
 
         return app;
     }

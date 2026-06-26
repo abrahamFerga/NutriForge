@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Barcode,
+  BookOpen,
   Camera,
   ChevronLeft,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeading } from "@/components/PageHeading";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,6 +27,8 @@ import {
   useDiary,
 } from "@/hooks/useQueries";
 import { ApiError, diaryApi, foodsApi } from "@/lib/api";
+import { QuickAddCard } from "@/components/QuickAddCard";
+import { MealTemplatesCard } from "@/components/MealTemplatesCard";
 import { queryKeys } from "@/lib/queryKeys";
 import {
   MEAL_SLOTS,
@@ -38,10 +42,19 @@ import {
 } from "@/lib/types";
 import { cn, round, toIsoDate, today } from "@/lib/utils";
 
+/** Guess the meal the user most likely wants to log, from the current hour. */
+function slotForHour(): MealSlot {
+  const h = new Date().getHours();
+  if (h < 11) return "Breakfast";
+  if (h < 15) return "Lunch";
+  if (h < 21) return "Dinner";
+  return "Snack";
+}
+
 export function Diary() {
   const qc = useQueryClient();
   const [date, setDate] = useState<string>(today());
-  const [mealSlot, setMealSlot] = useState<MealSlot>("Breakfast");
+  const [mealSlot, setMealSlot] = useState<MealSlot>(slotForHour);
 
   const diary = useDiary(date);
   const deleteEntry = useDeleteDiaryEntry(date);
@@ -52,23 +65,13 @@ export function Diary() {
     setDate(toIsoDate(d));
   }
 
-  // Copy every entry from the previous day onto this day (re-logged by grams, so each gets a fresh
-  // log-time nutrition snapshot). Reuses the normal GET/POST diary endpoints — no backend change.
+  // Copy the previous day's entries onto this day in one server call (#69): it re-resolves + re-snapshots
+  // each entry's current nutrition and skips foods no longer in the catalog.
   const copyYesterday = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       const y = new Date(date + "T00:00:00");
       y.setDate(y.getDate() - 1);
-      const prev = await diaryApi.get(toIsoDate(y));
-      for (const e of prev.entries) {
-        await diaryApi.create({
-          date,
-          mealSlot: e.mealSlot,
-          foodId: e.foodId,
-          portionId: null,
-          quantity: e.grams,
-        });
-      }
-      return prev.entries.length;
+      return diaryApi.copyDay(toIsoDate(y), date);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.diary(date) });
@@ -77,40 +80,51 @@ export function Diary() {
     },
   });
 
+  function invalidateDay() {
+    qc.invalidateQueries({ queryKey: queryKeys.diary(date) });
+    qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
+    qc.invalidateQueries({ queryKey: queryKeys.targets });
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Diary</h1>
-          <p className="text-sm text-slate-400">Log and review your day</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => copyYesterday.mutate()}
-            disabled={copyYesterday.isPending}
-            title="Copy yesterday's entries onto this day"
-          >
-            {copyYesterday.isPending ? <Spinner /> : <Copy className="h-4 w-4" />}
-            Copy yesterday
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => shiftDate(-1)} aria-label="Previous day">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value || today())}
-            className="w-44"
-          />
-          <Button variant="outline" size="icon" onClick={() => shiftDate(1)} aria-label="Next day">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <PageHeading
+        title="Diary"
+        subtitle="Log and review your day"
+        icon={BookOpen}
+        action={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyYesterday.mutate()}
+              disabled={copyYesterday.isPending}
+              title="Copy yesterday's entries onto this day"
+            >
+              {copyYesterday.isPending ? <Spinner /> : <Copy className="h-4 w-4" />}
+              Copy yesterday
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => shiftDate(-1)} aria-label="Previous day">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value || today())}
+              className="w-44"
+            />
+            <Button variant="outline" size="icon" onClick={() => shiftDate(1)} aria-label="Next day">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </>
+        }
+      />
 
       {copyYesterday.isError ? <ErrorState error={copyYesterday.error} /> : null}
+
+      <QuickAddCard date={date} mealSlot={mealSlot} onLogged={invalidateDay} />
+
+      <MealTemplatesCard date={date} mealSlot={mealSlot} onLogged={invalidateDay} />
 
       <div className="grid gap-6 lg:grid-cols-5">
         {/* Add food: Search | Describe | Barcode */}
@@ -456,7 +470,7 @@ function DescribeTab({
         className="w-full"
       >
         {parse.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-        Parse
+        Add these foods
       </Button>
 
       {noProvider ? (
@@ -776,7 +790,7 @@ function BarcodeTab({
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <Label htmlFor="gtin">Barcode (GTIN)</Label>
+        <Label htmlFor="gtin">Barcode number</Label>
         <Input
           id="gtin"
           inputMode="numeric"
@@ -835,8 +849,8 @@ function LogForm({
   onCancel: () => void;
   onLogged: () => void;
 }) {
-  // Use controlled meal-slot when provided (barcode tab), else local state.
-  const [localMealSlot, setLocalMealSlot] = useState<MealSlot>("Breakfast");
+  // Use controlled meal-slot when provided (barcode tab), else local state (defaulted from the clock).
+  const [localMealSlot, setLocalMealSlot] = useState<MealSlot>(slotForHour);
   const mealSlot = controlledMealSlot ?? localMealSlot;
   const setMealSlot = onMealSlotChange ?? setLocalMealSlot;
   const [portionId, setPortionId] = useState<string>(
@@ -845,6 +859,8 @@ function LogForm({
   const [quantity, setQuantity] = useState<string>(
     food.portions.length > 0 ? "1" : "100",
   );
+  // The common case is "1 serving" — keep the amount controls tucked away until asked.
+  const [adjusting, setAdjusting] = useState(false);
 
   const add = useLogEntry();
   const isGrams = portionId === GRAMS_OPTION;
@@ -882,43 +898,53 @@ function LogForm({
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <MealSlotSelect id="meal" value={mealSlot} onChange={setMealSlot} />
-        <div className="space-y-1">
-          <Label htmlFor="portion">Portion</Label>
-          <Select
-            id="portion"
-            value={portionId}
-            onChange={(e) => {
-              setPortionId(e.target.value);
-              setQuantity(e.target.value === GRAMS_OPTION ? "100" : "1");
-            }}
-          >
-            {food.portions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.grams}g)
-              </option>
-            ))}
-            <option value={GRAMS_OPTION}>Grams</option>
-          </Select>
-        </div>
-      </div>
+      <MealSlotSelect id="meal" value={mealSlot} onChange={setMealSlot} />
 
-      <div className="space-y-1">
-        <Label htmlFor="qty">{isGrams ? "Grams" : "Quantity"}</Label>
-        <Input
-          id="qty"
-          type="number"
-          min={0}
-          step={isGrams ? 10 : 0.25}
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value)}
-        />
-      </div>
+      {adjusting ? (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="portion">Portion</Label>
+            <Select
+              id="portion"
+              value={portionId}
+              onChange={(e) => {
+                setPortionId(e.target.value);
+                setQuantity(e.target.value === GRAMS_OPTION ? "100" : "1");
+              }}
+            >
+              {food.portions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.grams}g)
+                </option>
+              ))}
+              <option value={GRAMS_OPTION}>Grams</option>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="qty">{isGrams ? "Grams" : "Quantity"}</Label>
+            <Input
+              id="qty"
+              type="number"
+              min={0}
+              step={isGrams ? 10 : 0.25}
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex items-center justify-between text-xs text-slate-400">
-        <span>≈ {round(grams)}g</span>
-        <span className="font-medium text-brand-300">{estKcal} kcal</span>
+        <span>≈ {round(grams)}g · {estKcal} kcal</span>
+        {!adjusting ? (
+          <button
+            type="button"
+            onClick={() => setAdjusting(true)}
+            className="font-medium text-brand-400 hover:text-brand-300"
+          >
+            Adjust amount
+          </button>
+        ) : null}
       </div>
 
       {add.isError ? <ErrorState error={add.error} /> : null}
@@ -1083,7 +1109,7 @@ function TotalsRow({
         <tbody>
           <tr>
             <td className="px-3 py-2 text-left font-medium text-slate-300">
-              {target ? "vs target" : "logged"}
+              {target ? "Today vs goal" : "Logged today"}
             </td>
             {cell(consumed.kcal, target?.kcal, "")}
             {cell(consumed.proteinG, target?.proteinG, "g")}

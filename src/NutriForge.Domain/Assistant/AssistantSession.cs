@@ -15,6 +15,18 @@ public sealed class AssistantSession : IUserOwned, ITimestamped
     /// <summary>Serialized <c>AgentSession</c> JSON.</summary>
     public string Data { get; set; } = string.Empty;
 
+    /// <summary>Estimated token count (input + output) consumed in the current calendar month.</summary>
+    public long TokensUsedThisMonth { get; set; }
+
+    /// <summary>The month in which <see cref="TokensUsedThisMonth"/> was last reset (year + month, day = 1).</summary>
+    public DateOnly BudgetResetMonth { get; set; }
+
+    /// <summary>
+    /// Newline-separated facts the agent has remembered across conversations (#77).
+    /// Survives chat clears. The agent appends via RememberUserFact; injected at each new MAF session.
+    /// </summary>
+    public string? PersonalContext { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

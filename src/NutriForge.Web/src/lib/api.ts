@@ -16,11 +16,23 @@ import type {
   DiaryEntry,
   DiaryParseResult,
   DietPlanDto,
+  ConsentStatus,
+  ConsentType,
+  DietTemplate,
+  UpsertDietTemplateRequest,
+  GenerateRecipesRequest,
   FoodDetail,
   FoodSummary,
+  HouseholdMember,
+  UpsertHouseholdMemberRequest,
+  HydrationDay,
   ImportPreviewDto,
   ImportRecipeRequest,
+  LogMeasurementRequest,
   LogProposal,
+  Measurement,
+  MealTemplate,
+  QuickAddFood,
   MealSlot,
   PantryItem,
   PhotoAnalysisResult,
@@ -227,6 +239,17 @@ export const diaryApi = {
   trend(days = 7): Promise<TrendPoint[]> {
     return request<TrendPoint[]>(`/api/v1/diary/trend?days=${days}`);
   },
+  /** Distinct recently-logged foods for one-tap re-logging (#69). */
+  recents(limit = 12): Promise<QuickAddFood[]> {
+    return request<QuickAddFood[]>(`/api/v1/diary/recents?limit=${limit}`);
+  },
+  /** Server-side copy of a whole day (defaults yesterday → today). */
+  copyDay(from?: string, to?: string): Promise<{ copied: number }> {
+    return request<{ copied: number }>("/api/v1/diary/copy", {
+      method: "POST",
+      body: { from, to },
+    });
+  },
   /**
    * Parses a natural-language meal description into confirmable candidates.
    * Throws {@link ApiError} with status 503 when no LLM provider is configured,
@@ -289,6 +312,52 @@ export const diaryApi = {
   },
 };
 
+// ---- Favorites (#69) ----
+
+export const favoritesApi = {
+  list(): Promise<QuickAddFood[]> {
+    return request<QuickAddFood[]>("/api/v1/favorites");
+  },
+  add(foodId: string): Promise<void> {
+    return request<void>(`/api/v1/favorites/${encodeURIComponent(foodId)}`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  remove(foodId: string): Promise<void> {
+    return request<void>(`/api/v1/favorites/${encodeURIComponent(foodId)}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ---- Meal templates (#70) ----
+
+export const mealTemplatesApi = {
+  list(): Promise<MealTemplate[]> {
+    return request<MealTemplate[]>("/api/v1/meal-templates");
+  },
+  /** Snapshot the foods already logged in a day's meal slot into a reusable template. */
+  saveFromDay(name: string, date: string, mealSlot: MealSlot): Promise<MealTemplate> {
+    return request<MealTemplate>("/api/v1/meal-templates/from-day", {
+      method: "POST",
+      body: { name, date, mealSlot },
+    });
+  },
+  /** Log a saved template's foods into a day's meal slot. Returns how many entries were created. */
+  log(id: string, date: string, mealSlot: MealSlot): Promise<{ logged: number }> {
+    return request<{ logged: number }>(
+      `/api/v1/meal-templates/${encodeURIComponent(id)}/log`,
+      { method: "POST", body: { date, mealSlot } },
+    );
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/meal-templates/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+};
+
 // ---- Recipes ----
 
 export const recipesApi = {
@@ -313,6 +382,12 @@ export const recipesApi = {
       method: "DELETE",
     });
   },
+  /** Bulk-remove the caller's AI-generated recipes (#101). Returns how many were removed. */
+  clearAi(): Promise<{ removed: number }> {
+    return request<{ removed: number }>("/api/v1/recipes/ai-generated", {
+      method: "DELETE",
+    });
+  },
   /** Admin-only: promote a recipe to the shared global catalog. Throws 403 (not admin) / 409 (clash). */
   promoteGlobal(id: string): Promise<RecipeDto> {
     return request<RecipeDto>(
@@ -331,6 +406,16 @@ export const recipesApi = {
    */
   importPreview(body: ImportRecipeRequest): Promise<ImportPreviewDto> {
     return request<ImportPreviewDto>("/api/v1/recipes/import/preview", {
+      method: "POST",
+      body,
+    });
+  },
+  /**
+   * Generate original recipes with AI (#101) — no manual authoring; nutrition is computed by the
+   * catalog/reference resolver. Throws {@link ApiError} 503 when no AI provider is configured.
+   */
+  generate(body: GenerateRecipesRequest): Promise<RecipeDto[]> {
+    return request<RecipeDto[]>("/api/v1/recipes/generate", {
       method: "POST",
       body,
     });
@@ -375,6 +460,16 @@ export const dietPlansApi = {
   /** POST returns 202 with the (likely still Generating) plan. */
   create(body: CreateDietPlanRequest): Promise<DietPlanDto> {
     return request<DietPlanDto>("/api/v1/diet-plans", { method: "POST", body });
+  },
+  /**
+   * "Make me a full diet" (#101): generates recipes to fill the pool when it's thin, then plans.
+   * Returns the plan plus how many recipes were generated. Throws {@link ApiError} 503 with no AI.
+   */
+  auto(body: CreateDietPlanRequest): Promise<{ plan: DietPlanDto; recipesGenerated: number }> {
+    return request<{ plan: DietPlanDto; recipesGenerated: number }>("/api/v1/diet-plans/auto", {
+      method: "POST",
+      body,
+    });
   },
   get(id: string, signal?: AbortSignal): Promise<DietPlanDto> {
     return request<DietPlanDto>(
@@ -422,6 +517,113 @@ export const dietPlansApi = {
       );
     }
     return response.blob();
+  },
+};
+
+// ---- Saved diet presets (#102) ----
+
+export const dietTemplatesApi = {
+  list(): Promise<DietTemplate[]> {
+    return request<DietTemplate[]>("/api/v1/diet-templates");
+  },
+  add(body: UpsertDietTemplateRequest): Promise<DietTemplate> {
+    return request<DietTemplate>("/api/v1/diet-templates", { method: "POST", body });
+  },
+  update(id: string, body: UpsertDietTemplateRequest): Promise<DietTemplate> {
+    return request<DietTemplate>(`/api/v1/diet-templates/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/diet-templates/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+  /** One-tap regenerate from a saved preset (the saved household auto-attaches). Returns the new plan. */
+  generate(id: string): Promise<DietPlanDto> {
+    return request<DietPlanDto>(
+      `/api/v1/diet-templates/${encodeURIComponent(id)}/generate`,
+      { method: "POST", body: {} },
+    );
+  },
+};
+
+// ---- Saved household (#100) ----
+
+export const householdApi = {
+  list(): Promise<HouseholdMember[]> {
+    return request<HouseholdMember[]>("/api/v1/household");
+  },
+  add(body: UpsertHouseholdMemberRequest): Promise<HouseholdMember> {
+    return request<HouseholdMember>("/api/v1/household", { method: "POST", body });
+  },
+  update(id: string, body: UpsertHouseholdMemberRequest): Promise<HouseholdMember> {
+    return request<HouseholdMember>(`/api/v1/household/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/household/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ---- Body measurements (#71) ----
+
+export const measurementsApi = {
+  history(days = 90): Promise<Measurement[]> {
+    return request<Measurement[]>(`/api/v1/measurements?days=${days}`);
+  },
+  log(body: LogMeasurementRequest): Promise<Measurement> {
+    return request<Measurement>("/api/v1/measurements", { method: "POST", body });
+  },
+  remove(date: string): Promise<void> {
+    return request<void>(`/api/v1/measurements/${encodeURIComponent(date)}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ---- Consent / GDPR (#58) ----
+
+export const consentApi = {
+  status(): Promise<ConsentStatus[]> {
+    return request<ConsentStatus[]>("/api/v1/me/consent");
+  },
+  record(type: ConsentType, granted: boolean): Promise<ConsentStatus[]> {
+    return request<ConsentStatus[]>("/api/v1/me/consent", {
+      method: "POST",
+      body: { type, granted },
+    });
+  },
+  withdraw(type: ConsentType): Promise<ConsentStatus[]> {
+    return request<ConsentStatus[]>(
+      `/api/v1/me/consent/${encodeURIComponent(type)}/withdraw`,
+      { method: "POST", body: {} },
+    );
+  },
+};
+
+// ---- Hydration (#72) ----
+
+export const hydrationApi = {
+  /** Today's (or a given date's) intake + goal. */
+  get(date?: string): Promise<HydrationDay> {
+    const qs = date ? `?date=${encodeURIComponent(date)}` : "";
+    return request<HydrationDay>(`/api/v1/hydration${qs}`);
+  },
+  history(days = 30): Promise<HydrationDay[]> {
+    return request<HydrationDay[]>(`/api/v1/hydration/history?days=${days}`);
+  },
+  /** Add water (a negative amount undoes). Returns the updated day. */
+  add(ml: number): Promise<HydrationDay> {
+    return request<HydrationDay>("/api/v1/hydration", { method: "POST", body: { ml } });
+  },
+  setGoal(goalMl: number): Promise<HydrationDay> {
+    return request<HydrationDay>("/api/v1/hydration/goal", { method: "PUT", body: { goalMl } });
   },
 };
 

@@ -9,14 +9,22 @@ using NutriForge.Infrastructure;
 using NutriForge.Infrastructure.Ai;
 using NutriForge.Infrastructure.OpenFoodFacts;
 using NutriForge.Infrastructure.RecipeImport;
+using OpenTelemetry;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // QuestPDF Community licence (free for OSS / small orgs) — required before any PDF is generated.
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
+// Don't advertise the server stack in responses (#57).
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
+
 // OpenTelemetry + health checks + service discovery + HTTP resilience.
 builder.AddServiceDefaults();
+
+// Export the product-KPI meter (#50) so the dashboards/alerts can read the SPEC success metrics.
+builder.Services.ConfigureOpenTelemetryMeterProvider(m => m.AddMeter(NutriForge.Application.Observability.NutriForgeMetrics.MeterName));
 
 // Persistence, caching, audit-outbox, clock (Aspire-wired Postgres + Redis).
 builder.AddInfrastructure();
@@ -31,7 +39,7 @@ builder.Services.AddOpenFoodFacts();
 
 // Recipe-import connectors (YouTube metadata). The Data API key is optional — without it, import
 // falls back to oEmbed title/thumbnail + pasted recipe text (no auto-fetched description).
-builder.Services.AddRecipeImport(builder.Configuration["YouTube:ApiKey"]);
+builder.Services.AddRecipeImport(builder.Configuration["YouTube:ApiKey"], builder.Configuration);
 
 // The request-scoped authenticated principal (overrides the worker's system principal).
 builder.Services.AddHttpContextAccessor();
@@ -58,6 +66,17 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 app.UseExceptionHandler();
+
+// Defense-in-depth (#57): HSTS (HTTPS, deployed only) + strict security headers on every response.
+// The API is stateless/token-based and sets NO cookies, so there's no cookie surface to secure here
+// (auth is a Bearer token / dev header); the SPA owns its own cookie/session posture.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
+app.UseSecurityHeaders();
+
 app.MapDefaultEndpoints(); // /health + /alive (anonymous)
 
 if (app.Environment.IsDevelopment())
@@ -83,7 +102,10 @@ app.MapAssistantEndpoints();
 app.MapRecipeEndpoints();
 app.MapPlanningEndpoints();
 app.MapDietPlanEndpoints();
+app.MapHouseholdEndpoints();
+app.MapDietTemplateEndpoints();
 app.MapNotificationEndpoints();
+app.MapWhatsAppInboundEndpoints();
 
 await app.InitializeDatabaseAsync();
 

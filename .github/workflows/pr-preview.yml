@@ -1,0 +1,239 @@
+###############################################################################
+# pr-preview.yml
+#
+# Ephemeral preview environment per pull request (#66).
+#
+# On PR open / sync:
+#   1. Build the API image and push it to ACR, tagged pr-{N}.
+#   2. Create (or update) a Container App named nutriforge-preview-pr-{N} in the
+#      dev Container Apps environment.
+#   3. Create a Postgres database named appdb-pr-{N} on the shared dev server
+#      (if it doesn't exist). The API auto-migrates and seeds dev data on startup.
+#   4. Post a sticky PR comment with the preview URL.
+#
+# On PR close / merge:
+#   1. Delete the Container App.
+#   2. Drop the ephemeral Postgres database.
+#   3. Update the PR comment to say "Preview deleted".
+#
+# Required repository secrets / variables (same as cd-app.yml):
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID (secrets)
+#   ACR_NAME, ACR_LOGIN_SERVER (vars)
+#   PREVIEW_ENV_NAME      — Container Apps environment name (vars, e.g. cae-nutriforge-dev)
+#   PREVIEW_RG            — resource group for dev (vars, e.g. rg-nutriforge-dev)
+#   PREVIEW_PG_SERVER     — Postgres server name (vars, e.g. psql-nutriforge-dev-abc123)
+#   PREVIEW_UAMI_ID       — user-assigned managed identity resource ID for the preview app
+#   PREVIEW_UAMI_CLIENT_ID — UAMI client ID (used in the Postgres connection string)
+#   PREVIEW_KV_SECRET_ID  — redis Key Vault secret resource ID (versionless)
+#   PREVIEW_APP_INSIGHTS  — Application Insights connection string for preview
+#
+# Disabled by default: set the repo variable PREVIEW_ENABLED=true to activate.
+###############################################################################
+
+name: PR Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths-ignore: ["**/*.md", "docs/**"]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  DOTNET_NOLOGO: "true"
+  ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ACR_NAME:            ${{ vars.ACR_NAME }}
+  ACR_LOGIN_SERVER:    ${{ vars.ACR_LOGIN_SERVER }}
+  API_PROJECT:         src/NutriForge.Api/NutriForge.Api.csproj
+  API_REPO:            nutriforge-api
+  PR_NUMBER:           ${{ github.event.pull_request.number }}
+  PREVIEW_APP_NAME:    "ca-nutriforge-preview-pr-${{ github.event.pull_request.number }}"
+  PREVIEW_DB_NAME:     "appdb-pr-${{ github.event.pull_request.number }}"
+  AUDIT_DB_NAME:       "auditdb-pr-${{ github.event.pull_request.number }}"
+  IMAGE_TAG:           "pr-${{ github.event.pull_request.number }}-${{ github.sha }}"
+
+jobs:
+  # ── Deploy preview ──────────────────────────────────────────────────────── #
+  deploy:
+    name: Deploy preview (PR #${{ github.event.pull_request.number }})
+    if: >
+      vars.PREVIEW_ENABLED == 'true' &&
+      github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ env.ARM_CLIENT_ID }}
+          tenant-id:       ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "${{ env.ACR_NAME }}"
+
+      - name: Build & push API image
+        run: >
+          dotnet publish ${{ env.API_PROJECT }}
+          --configuration Release
+          --os linux --arch x64
+          /t:PublishContainer
+          -p:ContainerRegistry=${{ env.ACR_LOGIN_SERVER }}
+          -p:ContainerRepository=${{ env.API_REPO }}
+          -p:ContainerImageTag=${{ env.IMAGE_TAG }}
+
+      - name: Create ephemeral Postgres databases (idempotent)
+        run: |
+          set -euo pipefail
+          PG="${{ vars.PREVIEW_PG_SERVER }}"
+          RG="${{ vars.PREVIEW_RG }}"
+
+          for DB in "${{ env.PREVIEW_DB_NAME }}" "${{ env.AUDIT_DB_NAME }}"; do
+            if ! az postgres flexible-server db show -g "$RG" -s "$PG" -d "$DB" &>/dev/null; then
+              az postgres flexible-server db create -g "$RG" -s "$PG" -d "$DB" \
+                --charset UTF8 --collation "en_US.utf8"
+              echo "Created database: $DB"
+            else
+              echo "Database already exists: $DB (idempotent)"
+            fi
+          done
+
+      - name: Create or update preview Container App
+        id: deploy
+        env:
+          PG_HOST: "${{ vars.PREVIEW_PG_SERVER }}.postgres.database.azure.com"
+          UAMI_CLIENT_ID: ${{ vars.PREVIEW_UAMI_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          RG="${{ vars.PREVIEW_RG }}"
+          ENV="${{ vars.PREVIEW_ENV_NAME }}"
+          APP="${{ env.PREVIEW_APP_NAME }}"
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ env.API_REPO }}:${{ env.IMAGE_TAG }}"
+
+          CONN_APP="Host=$PG_HOST;Database=${{ env.PREVIEW_DB_NAME }};Username=$UAMI_CLIENT_ID;SSL Mode=Require;Trust Server Certificate=true"
+          CONN_AUDIT="Host=$PG_HOST;Database=${{ env.AUDIT_DB_NAME }};Username=$UAMI_CLIENT_ID;SSL Mode=Require;Trust Server Certificate=true"
+
+          # Create if absent; update-image if it already exists.
+          if az containerapp show -g "$RG" -n "$APP" &>/dev/null; then
+            az containerapp update -g "$RG" -n "$APP" --image "$IMAGE"
+          else
+            az containerapp create \
+              --name "$APP" \
+              --resource-group "$RG" \
+              --environment "$ENV" \
+              --image "$IMAGE" \
+              --user-assigned "${{ vars.PREVIEW_UAMI_ID }}" \
+              --registry-server "${{ env.ACR_LOGIN_SERVER }}" \
+              --registry-identity "${{ vars.PREVIEW_UAMI_ID }}" \
+              --ingress external --target-port 8080 --transport auto \
+              --min-replicas 0 --max-replicas 1 \
+              --cpu 0.5 --memory 1Gi \
+              --env-vars \
+                "ASPNETCORE_ENVIRONMENT=Development" \
+                "AZURE_CLIENT_ID=$UAMI_CLIENT_ID" \
+                "ConnectionStrings__appdb=$CONN_APP" \
+                "ConnectionStrings__auditdb=$CONN_AUDIT" \
+                "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.PREVIEW_APP_INSIGHTS }}" \
+              --secrets "redis-connection=keyvaultref:${{ vars.PREVIEW_KV_SECRET_ID }},identityref:${{ vars.PREVIEW_UAMI_ID }}" \
+              --env-vars "ConnectionStrings__cache=secretref:redis-connection"
+          fi
+
+          FQDN=$(az containerapp show -g "$RG" -n "$APP" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "preview_url=https://$FQDN" >> "$GITHUB_OUTPUT"
+          echo "Preview URL: https://$FQDN" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post (or update) preview URL comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-preview -->';
+            const body = `${marker}\n## 🔍 Preview environment\n\n**URL**: ${{ steps.deploy.outputs.preview_url }}\n**Image tag**: \`${{ env.IMAGE_TAG }}\`\n\n> Automatically provisioned on the shared \`dev\` Container Apps environment. Auto-migrated + dev-seeded on first request. Deleted when this PR is closed.`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, per_page: 100
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body
+              });
+            }
+
+  # ── Teardown preview ─────────────────────────────────────────────────────── #
+  teardown:
+    name: Teardown preview (PR #${{ github.event.pull_request.number }})
+    if: >
+      vars.PREVIEW_ENABLED == 'true' &&
+      github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ env.ARM_CLIENT_ID }}
+          tenant-id:       ${{ env.ARM_TENANT_ID }}
+          subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+
+      - name: Delete preview Container App
+        run: |
+          az containerapp delete \
+            --name "${{ env.PREVIEW_APP_NAME }}" \
+            --resource-group "${{ vars.PREVIEW_RG }}" \
+            --yes 2>/dev/null || echo "App not found or already deleted."
+
+      - name: Drop ephemeral Postgres databases
+        run: |
+          set -euo pipefail
+          PG="${{ vars.PREVIEW_PG_SERVER }}"
+          RG="${{ vars.PREVIEW_RG }}"
+          for DB in "${{ env.PREVIEW_DB_NAME }}" "${{ env.AUDIT_DB_NAME }}"; do
+            az postgres flexible-server db delete -g "$RG" -s "$PG" -d "$DB" \
+              --yes 2>/dev/null || echo "Database $DB not found or already deleted."
+          done
+
+      - name: Update PR comment to reflect deletion
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-preview -->';
+            const body = `${marker}\n## ~~🔍 Preview environment~~\n\n> Preview environment deleted (PR closed).`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, per_page: 100
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body
+              });
+            }

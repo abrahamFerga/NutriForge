@@ -1,0 +1,200 @@
+###############################################################################
+# pitr-restore-drill.yml
+#
+# Quarterly point-in-time restore drill for NutriForge's PostgreSQL Flexible
+# Server (#54). Proves that automated backups are intact and that PITR works
+# end-to-end, without touching the live database.
+#
+# Schedule: 08:00 UTC on the first Monday of Jan, Apr, Jul, Oct
+#   (approximate — cron can't express "first Monday", so we run on the 1st of
+#    the month and accept that it might not be a Monday; the important signal is
+#    that the drill fires four times per year).
+#
+# On-demand: push the "Run workflow" button in the Actions tab and supply
+#   the target restore-point timestamp (ISO-8601, e.g. 2026-06-01T02:00:00Z).
+#
+# Outputs:
+#   - A GitHub Actions summary with the restore duration and outcome.
+#   - A Job summary annotation visible in the PR / commit check.
+#   - (Optional) A PagerDuty alert if the drill fails, via the SECRET
+#     PAGERDUTY_ROUTING_KEY.
+###############################################################################
+
+name: PITR restore drill
+
+on:
+  schedule:
+    # 08:00 UTC on the 1st of Jan, Apr, Jul, Oct
+    - cron: "0 8 1 1,4,7,10 *"
+  workflow_dispatch:
+    inputs:
+      restore_time:
+        description: "ISO-8601 UTC timestamp to restore to (default: 1 hour ago)"
+        required: false
+        default: ""
+      environment:
+        description: "Target environment tfvars (dev | prod)"
+        required: false
+        default: "prod"
+
+permissions:
+  id-token: write   # OIDC token for Azure login
+  contents: read
+
+env:
+  # Override these per-environment via repository variables or secrets.
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID:        ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID:        ${{ secrets.AZURE_CLIENT_ID }}      # managed identity / service principal
+  RESOURCE_GROUP:         ${{ vars.PG_RESOURCE_GROUP || 'rg-nutriforge-prod' }}
+  SOURCE_SERVER:          ${{ vars.PG_SERVER_NAME    || 'psql-nutriforge-prod' }}
+  # Drill server name: includes run number so parallel drills don't collide.
+  DRILL_SERVER:           "psql-nutriforge-drill-${{ github.run_number }}"
+  LOCATION:               ${{ vars.AZURE_LOCATION   || 'westeurope' }}
+
+jobs:
+  drill:
+    name: PITR restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── Auth ──────────────────────────────────────────────────────────────── #
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ env.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      # ── Determine restore point ────────────────────────────────────────────── #
+      - name: Resolve restore timestamp
+        id: ts
+        run: |
+          if [ -n "${{ inputs.restore_time }}" ]; then
+            RESTORE_TIME="${{ inputs.restore_time }}"
+          else
+            # Default: 1 hour ago — well within the backup retention window.
+            RESTORE_TIME=$(date -u -d '1 hour ago' '+%Y-%m-%dT%H:%M:%SZ')
+          fi
+          echo "restore_time=$RESTORE_TIME" >> "$GITHUB_OUTPUT"
+          echo "### PITR restore drill" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Source server**: \`${{ env.SOURCE_SERVER }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Restore point**: \`$RESTORE_TIME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Drill server**:  \`${{ env.DRILL_SERVER }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify source server exists and has the restore point
+        run: |
+          set -euo pipefail
+          EARLIEST=$(az postgres flexible-server show \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --name            "${{ env.SOURCE_SERVER }}" \
+            --query           "backup.earliestRestoreDate" \
+            --output          tsv 2>/dev/null || echo "")
+          if [ -z "$EARLIEST" ]; then
+            echo "::error::Source server ${{ env.SOURCE_SERVER }} not found or PITR not enabled."
+            exit 1
+          fi
+          echo "Earliest restore point: $EARLIEST"
+          echo "- **Earliest restore point**: \`$EARLIEST\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Restore ───────────────────────────────────────────────────────────── #
+      - name: Create PITR restore server
+        id: restore
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+
+          az postgres flexible-server restore \
+            --resource-group    "${{ env.RESOURCE_GROUP }}" \
+            --name              "${{ env.DRILL_SERVER }}" \
+            --source-server     "${{ env.SOURCE_SERVER }}" \
+            --restore-time      "${{ steps.ts.outputs.restore_time }}" \
+            --location          "${{ env.LOCATION }}" \
+            --yes \
+            --no-wait
+
+          echo "Restore initiated. Waiting for provisioning to complete..."
+
+          # Poll until the server is in 'Ready' state (max 40 min).
+          DEADLINE=$(( START + 2400 ))
+          while true; do
+            STATE=$(az postgres flexible-server show \
+              --resource-group "${{ env.RESOURCE_GROUP }}" \
+              --name           "${{ env.DRILL_SERVER }}" \
+              --query          "state" \
+              --output         tsv 2>/dev/null || echo "Creating")
+            echo "  State: $STATE ($(( $(date +%s) - START ))s elapsed)"
+            if [ "$STATE" = "Ready" ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::Timed out waiting for restore server to become Ready."
+              exit 1
+            fi
+            sleep 30
+          done
+
+          ELAPSED=$(( $(date +%s) - START ))
+          echo "elapsed=$ELAPSED" >> "$GITHUB_OUTPUT"
+          echo "- **Restore duration**: ${ELAPSED}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Verify connectivity ────────────────────────────────────────────────── #
+      - name: Verify restored server is reachable
+        run: |
+          set -euo pipefail
+          FQDN=$(az postgres flexible-server show \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --name           "${{ env.DRILL_SERVER }}" \
+            --query          "fullyQualifiedDomainName" \
+            --output         tsv)
+          # pg_isready exits 0 when the server is accepting connections.
+          pg_isready -h "$FQDN" -p 5432 -t 30
+          echo "- **Connectivity**: ✅ pg_isready OK (\`$FQDN\`)" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Summary ───────────────────────────────────────────────────────────── #
+      - name: Write drill outcome to summary
+        if: success()
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Result: ✅ PASSED** — restore succeeded in ${{ steps.restore.outputs.elapsed }}s." >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Cleanup (always) ──────────────────────────────────────────────────── #
+      - name: Delete drill server
+        if: always()
+        run: |
+          az postgres flexible-server delete \
+            --resource-group "${{ env.RESOURCE_GROUP }}" \
+            --name           "${{ env.DRILL_SERVER }}" \
+            --yes \
+            --no-wait 2>/dev/null || true
+          echo "Drill server deletion initiated."
+
+      # ── Alert on failure ──────────────────────────────────────────────────── #
+      - name: Alert on failure
+        if: failure() && env.PAGERDUTY_ROUTING_KEY != ''
+        env:
+          PAGERDUTY_ROUTING_KEY: ${{ secrets.PAGERDUTY_ROUTING_KEY }}
+        run: |
+          curl --silent --fail \
+            --header "Content-Type: application/json" \
+            --data "{
+              \"routing_key\": \"$PAGERDUTY_ROUTING_KEY\",
+              \"event_action\": \"trigger\",
+              \"payload\": {
+                \"summary\": \"NutriForge PITR restore drill FAILED (run #${{ github.run_number }})\",
+                \"severity\": \"critical\",
+                \"source\": \"github-actions\",
+                \"custom_details\": {
+                  \"workflow\": \"${{ github.workflow }}\",
+                  \"run_url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"
+                }
+              }
+            }" \
+            https://events.pagerduty.com/v2/enqueue || true
+
+      - name: Write failure to summary
+        if: failure()
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Result: ❌ FAILED** — see the step logs above for details." >> "$GITHUB_STEP_SUMMARY"

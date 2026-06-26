@@ -1,0 +1,60 @@
+{
+  "app": {
+    "name": "NutriForge",
+    "tagline": "Seguimiento nutricional con IA"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "diary": "Diario",
+    "foods": "Alimentos",
+    "recipes": "Recetas",
+    "plan": "Plan de comidas",
+    "settings": "Ajustes"
+  },
+  "diary": {
+    "title": "Diario de alimentos",
+    "addEntry": "Añadir entrada",
+    "noEntries": "Aún no has registrado nada. ¡Añade tu primera comida!",
+    "total": "Total",
+    "target": "Objetivo",
+    "remaining": "Restante"
+  },
+  "foods": {
+    "title": "Catálogo de alimentos",
+    "search": "Buscar alimentos…",
+    "addFood": "Añadir alimento"
+  },
+  "profile": {
+    "title": "Perfil",
+    "save": "Guardar",
+    "saving": "Guardando…"
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "dailySummary": "Resumen diario",
+    "weeklyDigest": "Resumen semanal",
+    "logReminder": "Recordatorio de registro",
+    "sendNow": "Enviar resumen ahora",
+    "linkAccount": "Vincular cuenta",
+    "relinkAccount": "Revincular cuenta",
+    "linked": "Vinculado",
+    "notLinked": "Sin vincular",
+    "enabled": "Activado",
+    "sendAtUtc": "Enviar a (UTC)"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "error": "Algo salió mal.",
+    "retry": "Reintentar",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "close": "Cerrar"
+  },
+  "theme": {
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  }
+}

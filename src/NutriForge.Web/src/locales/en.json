@@ -1,0 +1,60 @@
+{
+  "app": {
+    "name": "NutriForge",
+    "tagline": "AI-powered nutrition tracking"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "diary": "Diary",
+    "foods": "Foods",
+    "recipes": "Recipes",
+    "plan": "Meal Plan",
+    "settings": "Settings"
+  },
+  "diary": {
+    "title": "Food Diary",
+    "addEntry": "Add entry",
+    "noEntries": "Nothing logged yet. Add your first meal!",
+    "total": "Total",
+    "target": "Target",
+    "remaining": "Remaining"
+  },
+  "foods": {
+    "title": "Food Catalog",
+    "search": "Search foods…",
+    "addFood": "Add food"
+  },
+  "profile": {
+    "title": "Profile",
+    "save": "Save",
+    "saving": "Saving…"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "dailySummary": "Daily summary",
+    "weeklyDigest": "Weekly digest",
+    "logReminder": "Log reminder",
+    "sendNow": "Send my summary now",
+    "linkAccount": "Link account",
+    "relinkAccount": "Re-link account",
+    "linked": "Linked",
+    "notLinked": "Not linked yet",
+    "enabled": "Enabled",
+    "sendAtUtc": "Send at (UTC)"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong.",
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  }
+}

@@ -3,6 +3,7 @@ using NutriForge.Application.Abstractions;
 using NutriForge.Domain.Assistant;
 using NutriForge.Domain.Catalog;
 using NutriForge.Domain.Common;
+using NutriForge.Domain.Connectors;
 using NutriForge.Domain.Diary;
 using NutriForge.Domain.Planning;
 using NutriForge.Domain.Recipes;
@@ -42,10 +43,17 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<Target> Targets => Set<Target>();
     public DbSet<DiaryEntry> DiaryEntries => Set<DiaryEntry>();
+    public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
+    public DbSet<HydrationDay> HydrationDays => Set<HydrationDay>();
+    public DbSet<Domain.Consent.ConsentRecord> ConsentRecords => Set<Domain.Consent.ConsentRecord>();
+    public DbSet<FavoriteFood> FavoriteFoods => Set<FavoriteFood>();
+    public DbSet<MealTemplate> MealTemplates => Set<MealTemplate>();
+    public DbSet<Domain.Users.HouseholdMember> HouseholdMembers => Set<Domain.Users.HouseholdMember>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
+    public DbSet<Domain.Planning.DietTemplate> DietTemplates => Set<Domain.Planning.DietTemplate>();
     public DbSet<Domain.Notifications.ChannelMessage> ChannelMessages => Set<Domain.Notifications.ChannelMessage>();
     public DbSet<Domain.Notifications.ChannelSubscription> ChannelSubscriptions => Set<Domain.Notifications.ChannelSubscription>();
     public DbSet<Domain.Notifications.AccountLinkToken> AccountLinkTokens => Set<Domain.Notifications.AccountLinkToken>();
@@ -53,6 +61,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     // Operational infra
     public DbSet<OutboxMessage> Outbox => Set<OutboxMessage>();
     public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<ConnectorRun> ConnectorRuns => Set<ConnectorRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -122,7 +131,10 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(r => r.SourceUrl).HasMaxLength(2048);
             e.Property(r => r.SourceType).HasMaxLength(20);
             e.Property(r => r.SourceVideoId).HasMaxLength(20);
+            e.Property(r => r.SourceKey).HasMaxLength(400);
             e.Property(r => r.ThumbnailUrl).HasMaxLength(2048);
+            // Web-import dedup: one recipe per owner per normalized source page (YouTube uses the video index).
+            e.HasIndex(r => new { r.OwnerUserId, r.SourceKey }).IsUnique().HasFilter("\"SourceKey\" IS NOT NULL");
             e.HasMany(r => r.Ingredients).WithOne().HasForeignKey(i => i.RecipeId).OnDelete(DeleteBehavior.Cascade);
             e.Navigation(r => r.Ingredients).UsePropertyAccessMode(PropertyAccessMode.Field);
             e.HasIndex(r => r.IsNutritionComputed);
@@ -196,6 +208,84 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(d => d.FoodName).HasMaxLength(200);
             e.Property(d => d.PortionName).HasMaxLength(100);
             e.HasQueryFilter(d => d.UserId == CurrentUserId);
+        });
+
+        b.Entity<BodyMeasurement>(e =>
+        {
+            e.ToTable("body_measurements", "app");
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => new { m.UserId, m.Date }).IsUnique(); // one entry per day per user
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        // Hydration (#72): one running-total row per (user, day).
+        b.Entity<HydrationDay>(e =>
+        {
+            e.ToTable("hydration_days", "app");
+            e.HasKey(h => h.Id);
+            e.HasIndex(h => new { h.UserId, h.Date }).IsUnique();
+            e.HasQueryFilter(h => h.UserId == CurrentUserId);
+        });
+
+        // Consent trail (#58): append-only grant/withdraw decisions, enums stored as strings.
+        b.Entity<Domain.Consent.ConsentRecord>(e =>
+        {
+            e.ToTable("consent_records", "app");
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Type).HasConversion<string>().HasMaxLength(40);
+            e.Property(r => r.LawfulBasis).HasConversion<string>().HasMaxLength(30);
+            e.Property(r => r.PolicyVersion).HasMaxLength(20);
+            e.HasIndex(r => new { r.UserId, r.Type, r.RecordedAt });
+            e.HasQueryFilter(r => r.UserId == CurrentUserId);
+        });
+
+        b.Entity<FavoriteFood>(e =>
+        {
+            e.ToTable("favorite_foods", "app");
+            e.HasKey(f => f.Id);
+            e.HasIndex(f => new { f.UserId, f.FoodId }).IsUnique(); // at most one per (user, food)
+            e.HasQueryFilter(f => f.UserId == CurrentUserId);
+        });
+
+        // Saved meals (#70): an owner-scoped aggregate with owned item children.
+        b.Entity<MealTemplate>(e =>
+        {
+            e.ToTable("meal_templates", "app");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Name).HasMaxLength(120).IsRequired();
+            e.HasIndex(t => t.UserId);
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
+            e.HasMany(t => t.Items).WithOne().HasForeignKey(i => i.MealTemplateId).OnDelete(DeleteBehavior.Cascade);
+            e.Navigation(t => t.Items).UsePropertyAccessMode(PropertyAccessMode.Field);
+        });
+
+        b.Entity<MealTemplateItem>(e =>
+        {
+            e.ToTable("meal_template_items", "app");
+            e.HasKey(i => i.Id);
+        });
+
+        // Saved household (#100): the people a user regularly cooks for, reused across every diet plan.
+        b.Entity<Domain.Users.HouseholdMember>(e =>
+        {
+            e.ToTable("household_members", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.Name).HasMaxLength(120).IsRequired();
+            e.Property(m => m.Relationship).HasMaxLength(60);
+            e.HasIndex(m => m.UserId);
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        // Saved diet presets (#102): named generation parameters the user re-runs in one tap.
+        b.Entity<Domain.Planning.DietTemplate>(e =>
+        {
+            e.ToTable("diet_templates", "app");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Name).HasMaxLength(120).IsRequired();
+            e.Property(t => t.DietSlug).HasMaxLength(60);
+            e.Property(t => t.Desire).HasMaxLength(1000);
+            e.HasIndex(t => t.UserId);
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
         });
 
         b.Entity<AssistantSession>(e =>
@@ -316,6 +406,16 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.HasKey(r => r.Id);
             e.Property(r => r.Key).HasMaxLength(200).IsRequired();
             e.HasIndex(r => new { r.Key, r.UserId }).IsUnique();
+        });
+
+        // Connector registry last-run log (#14): one upserted row per connector, keyed by its stable id.
+        b.Entity<ConnectorRun>(e =>
+        {
+            e.ToTable("connector_runs", "ops");
+            e.HasKey(r => r.ConnectorKey);
+            e.Property(r => r.ConnectorKey).HasMaxLength(50);
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(r => r.Detail).HasMaxLength(1000);
         });
     }
 }

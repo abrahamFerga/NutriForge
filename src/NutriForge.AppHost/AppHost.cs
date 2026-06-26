@@ -75,6 +75,20 @@ if (!underTest)
     api.WithEnvironment("YouTube__ApiKey", youTubeKey);
 }
 
+// Twilio WhatsApp channel (#96) — OPTIONAL. Enables real WhatsApp notifications; without it the
+// app falls back to the MockChannel (stored in the DB outbox). Credentials come from user-secrets
+// or env vars; missing values default to "" so startup is never blocked.
+if (!underTest)
+{
+    builder.Configuration["Parameters:twilio-account-sid"] ??= Environment.GetEnvironmentVariable("TWILIO_ACCOUNT_SID") ?? "";
+    builder.Configuration["Parameters:twilio-auth-token"] ??= Environment.GetEnvironmentVariable("TWILIO_AUTH_TOKEN") ?? "";
+    var twilioSid = builder.AddParameter("twilio-account-sid", secret: false);
+    var twilioToken = builder.AddParameter("twilio-auth-token", secret: true);
+    api.WithEnvironment("Channels__WhatsApp__Provider", "twilio")
+       .WithEnvironment("Channels__WhatsApp__Twilio__AccountSid", twilioSid)
+       .WithEnvironment("Channels__WhatsApp__Twilio__AuthToken", twilioToken);
+}
+
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
 // backend. Skipped under integration tests (SKIP_NPM_APPS=true) so they don't boot the Node dev
 // server.

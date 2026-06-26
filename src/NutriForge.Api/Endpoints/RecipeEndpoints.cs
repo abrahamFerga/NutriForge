@@ -75,6 +75,11 @@ public static class RecipeEndpoints
             };
         }).WithName("DeleteRecipe");
 
+        // Bulk-clear the caller's AI-generated recipes (#101) — declutter a catalog they never wanted.
+        group.MapDelete("/ai-generated", async (RecipeService recipes, ICurrentUser user, CancellationToken ct) =>
+            Results.Ok(new { removed = await recipes.ClearAiGeneratedAsync(user.CurrentUserId(), ct) }))
+            .WithName("ClearAiRecipes");
+
         // Promote a recipe to the shared GLOBAL catalog. Admin-only — layered on top of the group's
         // OwnerOnly so BOTH must pass.
         group.MapPost("/{id:guid}/promote-global", async (Guid id, RecipeService recipes, CancellationToken ct) =>
@@ -97,24 +102,45 @@ public static class RecipeEndpoints
             if (string.IsNullOrWhiteSpace(req.Url) && string.IsNullOrWhiteSpace(req.Text))
             {
                 return Results.Problem(title: "Nothing to import",
-                    detail: "Provide a YouTube/recipe URL or pasted recipe text.", statusCode: StatusCodes.Status400BadRequest);
+                    detail: "Provide a recipe URL (web or YouTube) or pasted recipe text/HTML.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            if (!import.IsConfigured)
+            var result = await import.PreviewAsync(req, ct);
+            return result.Outcome switch
             {
-                return Results.Problem(title: "Recipe import unavailable",
-                    detail: "No AI provider is configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
-            }
-
-            var preview = await import.PreviewAsync(req, ct);
-            return preview is null
-                ? Results.Problem(title: "Couldn't extract a recipe",
-                    detail: "No recipe found. For a YouTube link with an empty description, paste the recipe text.",
-                    statusCode: StatusCodes.Status422UnprocessableEntity)
-                : Results.Ok(preview);
+                ImportOutcome.Ok => Results.Ok(result.Preview),
+                ImportOutcome.NeedsExtractor => Results.Problem(title: "Recipe import unavailable",
+                    detail: "This page has no structured recipe data, and AI extraction needs an AI provider. Paste a recipe URL with schema.org data, or the recipe text.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable),
+                _ => Results.Problem(title: "Couldn't extract a recipe",
+                    detail: "No recipe found. Try a recipe URL with structured (schema.org) data, or paste the recipe text.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity),
+            };
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("ImportRecipePreview");
+
+        // Generate original recipes with AI (#101) — no manual authoring. The model writes the recipe;
+        // the catalog + reference resolver own every macro. Returns the created (owned) recipes.
+        group.MapPost("/generate", async (GenerateRecipesRequest req, RecipeGenerationService gen, ICurrentUser user, CancellationToken ct) =>
+        {
+            if (!gen.IsConfigured)
+            {
+                return Results.Problem(title: "Recipe generation unavailable",
+                    detail: "AI recipe generation needs an AI provider to be configured.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var count = Math.Clamp(req?.Count ?? 3, 1, 12);
+            var brief = new RecipeBrief(
+                req?.MealType, req?.DietSlug, req?.TargetKcal, req?.MaxPrepMinutes,
+                req?.Exclude, req?.Cuisine, Math.Clamp(req?.Servings ?? 4, 1, 12));
+
+            var created = await gen.GenerateAsync(user.CurrentUserId(), brief, count, ct: ct);
+            return Results.Ok(created);
+        })
+            .RequireRateLimiting(RateLimitPolicies.Expensive)
+            .WithName("GenerateRecipes");
 
         return app;
     }

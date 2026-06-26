@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using NutriForge.Application.Abstractions;
 using NutriForge.Application.Food;
@@ -15,7 +16,7 @@ public sealed record FoodHit(
 /// <summary>
 /// The NutritionAssistant's tool surface. Each tool delegates to the same Application service the
 /// REST API uses, so deterministic code owns every number (ADR-0004) — the LLM only decides which
-/// tool to call and narrates the result. All tools are read-only and owner-scoped to the caller.
+/// tool to call and narrates the result. All tools are owner-scoped to the caller.
 /// Resolved per request so they run inside the authenticated user's scope.
 /// </summary>
 public sealed class AssistantTools(
@@ -25,7 +26,8 @@ public sealed class AssistantTools(
     ProfileService profiles,
     ICurrentUser user,
     IClock clock,
-    LogProposalHolder proposals)
+    LogProposalHolder proposals,
+    IAppDbContext db)
 {
     private Guid Uid => user.UserId ?? throw new InvalidOperationException("No authenticated user.");
 
@@ -37,6 +39,7 @@ public sealed class AssistantTools(
         AIFunctionFactory.Create(GetTodaySummary),
         AIFunctionFactory.Create(GetProfile),
         AIFunctionFactory.Create(ProposeLogFood),
+        AIFunctionFactory.Create(RememberUserFact),
     ];
 
     [Description("Search the food catalog by name. Returns matching foods with per-100g calories and macros and an id usable for logging.")]
@@ -108,5 +111,79 @@ public sealed class AssistantTools(
             mealSlot = slot.ToString(),
             note = "Proposal ready — tell the user exactly what will be logged and ask them to confirm.",
         };
+    }
+
+    [Description("Permanently remember a fact about this user (preference, dietary restriction, goal, or personal detail) so it is available across future conversations. Append one fact per call.")]
+    public async Task<string> RememberUserFact(
+        [Description("A concise fact to remember, e.g. 'lactose intolerant' or 'aims for 150 g protein/day'.")] string fact,
+        CancellationToken cancellationToken)
+    {
+        var stored = await db.AssistantSessions
+            .FirstOrDefaultAsync(s => s.UserId == Uid, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (stored is null)
+        {
+            return "Session not yet persisted; fact noted for this conversation only.";
+        }
+
+        stored.PersonalContext = string.IsNullOrWhiteSpace(stored.PersonalContext)
+            ? fact.Trim()
+            : stored.PersonalContext + "\n" + fact.Trim();
+
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return "Remembered.";
+    }
+
+    /// <summary>
+    /// Builds the context block prepended to the first message of each new MAF session (#79/#77).
+    /// Returns null when there is nothing to inject (e.g. diary unavailable and no personal context).
+    /// </summary>
+    internal async Task<string?> BuildSessionContextAsync(string? personalContext, CancellationToken ct)
+    {
+        string? nutritionLine = null;
+
+        try
+        {
+            var day = await diary.GetDayAsync(Uid, clock.Today, ct).ConfigureAwait(false);
+            var c = day.Consumed;
+            var r = day.Remaining;
+            var sb = new System.Text.StringBuilder();
+            sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"Today ({clock.Today:yyyy-MM-dd}): {c.Kcal:F0} kcal consumed");
+            if (day.Target is not null)
+            {
+                sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $" of {day.Target.Kcal:F0} target ({r.Kcal:F0} remaining)");
+            }
+            sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $". Protein {c.ProteinG:F0}/{c.ProteinG + r.ProteinG:F0} g, Fat {c.FatG:F0}/{c.FatG + r.FatG:F0} g, Carbs {c.CarbG:F0}/{c.CarbG + r.CarbG:F0} g.");
+            if (day.Entries.Count > 0)
+            {
+                sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $" ({day.Entries.Count} entries logged.)");
+            }
+            nutritionLine = sb.ToString();
+        }
+#pragma warning disable CA1031 // best-effort; don't crash the chat if the diary is temporarily unavailable
+        catch
+        {
+            // diary unavailable — omit the nutrition line
+        }
+#pragma warning restore CA1031
+
+        var hasNutrition = !string.IsNullOrWhiteSpace(nutritionLine);
+        var hasPersonal = !string.IsNullOrWhiteSpace(personalContext);
+
+        if (!hasNutrition && !hasPersonal)
+        {
+            return null;
+        }
+
+        var parts = new List<string>(2);
+        if (hasNutrition) { parts.Add(nutritionLine!); }
+        if (hasPersonal) { parts.Add("Remembered preferences: " + personalContext!.Trim()); }
+
+        return "[Context — loaded at session start]\n" + string.Join("\n", parts);
     }
 }

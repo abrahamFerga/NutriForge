@@ -22,11 +22,29 @@ public static class DietPlanEndpoints
         // Async generate — returns 202 with the plan id; the worker fills it in.
         group.MapPost("/", async (CreateDietPlanRequest req, ICurrentUser user, DietPlanService plans, CancellationToken ct) =>
         {
-            var plan = await plans.CreateAsync(user.CurrentUserId(), req, ct);
+            var plan = await plans.CreateAsync(user.CurrentUserId(), req, ct: ct);
             return Results.Accepted($"/api/v1/diet-plans/{plan.Id}", plan);
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)
             .WithName("CreateDietPlan");
+
+        // "Make me a full diet" (#101): generate recipes to fill the pool if it's too thin, then plan.
+        // The user authors nothing. 503 when no AI provider is configured.
+        group.MapPost("/auto", async (CreateDietPlanRequest req, ICurrentUser user, AutoDietService auto, CancellationToken ct) =>
+        {
+            if (!auto.IsConfigured)
+            {
+                return Results.Problem(title: "Auto diet unavailable",
+                    detail: "Generating a full diet needs an AI provider to be configured.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var result = await auto.CreateAsync(user.CurrentUserId(), req, ct);
+            return Results.Accepted($"/api/v1/diet-plans/{result.Plan.Id}",
+                new { plan = result.Plan, recipesGenerated = result.RecipesGenerated });
+        })
+            .RequireRateLimiting(RateLimitPolicies.Expensive)
+            .WithName("AutoCreateDietPlan");
 
         // Poll until status is ready | infeasible.
         group.MapGet("/{id:guid}", async (Guid id, ICurrentUser user, DietPlanService plans, CancellationToken ct) =>

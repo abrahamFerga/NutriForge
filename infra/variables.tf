@@ -132,6 +132,22 @@ variable "zone_redundant" {
   default     = false
 }
 
+variable "postgres_backup_retention_days" {
+  description = "Number of days to retain PostgreSQL automated backups (7–35). Drives the PITR restore window."
+  type        = number
+  default     = 7
+  validation {
+    condition     = var.postgres_backup_retention_days >= 7 && var.postgres_backup_retention_days <= 35
+    error_message = "postgres_backup_retention_days must be between 7 and 35."
+  }
+}
+
+variable "postgres_geo_redundant_backup" {
+  description = "Enable geo-redundant backups for cross-region PITR (requires a paired region; not available on Basic SKU)."
+  type        = bool
+  default     = false
+}
+
 variable "log_retention_days" {
   description = "Log Analytics workspace retention in days."
   type        = number
@@ -142,4 +158,17 @@ variable "tags" {
   description = "Extra tags merged onto the standard tag set."
   type        = map(string)
   default     = {}
+}
+
+# --- Monitoring & alerting (#51) --------------------------------------------- #
+variable "oncall_webhook_url" {
+  description = "Webhook URL for the critical SLO action group (PagerDuty Events API v2, OpsGenie, etc.)."
+  type        = string
+  default     = "https://example.com/placeholder" # override in tfvars or via TF_VAR_oncall_webhook_url
+}
+
+variable "engineering_email" {
+  description = "Email address for SLO warning alerts (ticket creation)."
+  type        = string
+  default     = "engineering@example.com"
 }

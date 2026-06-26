@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NutriForge.Domain.Assistant;
+using NutriForge.Domain.Consent;
 using NutriForge.Domain.Diary;
 using NutriForge.Domain.Notifications;
 using NutriForge.Domain.Planning;
@@ -17,10 +18,17 @@ public interface IAppDbContext
     DbSet<Profile> Profiles { get; }
     DbSet<Target> Targets { get; }
     DbSet<DiaryEntry> DiaryEntries { get; }
+    DbSet<BodyMeasurement> BodyMeasurements { get; }
+    DbSet<HydrationDay> HydrationDays { get; }
+    DbSet<ConsentRecord> ConsentRecords { get; }
+    DbSet<FavoriteFood> FavoriteFoods { get; }
+    DbSet<MealTemplate> MealTemplates { get; }
+    DbSet<HouseholdMember> HouseholdMembers { get; }
     DbSet<AssistantSession> AssistantSessions { get; }
     DbSet<PantryItem> PantryItems { get; }
     DbSet<ShoppingList> ShoppingLists { get; }
     DbSet<MealPlan> MealPlans { get; }
+    DbSet<DietTemplate> DietTemplates { get; }
     DbSet<ChannelMessage> ChannelMessages { get; }
     DbSet<ChannelSubscription> ChannelSubscriptions { get; }
     DbSet<AccountLinkToken> AccountLinkTokens { get; }

@@ -8,7 +8,8 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-xl border border-slate-800 bg-slate-900/60 shadow-lg shadow-black/20 backdrop-blur",
+        // Token-driven elevated surface (tracks light/dark) — see .nf-card in index.css.
+        "nf-card",
         className,
       )}
       {...props}
