@@ -1097,7 +1097,7 @@ function TotalsRow({
         <tbody>
           <tr>
             <td className="px-3 py-2 text-left font-medium text-slate-300">
-              {target ? "vs target" : "logged"}
+              {target ? "Today vs goal" : "Logged today"}
             </td>
             {cell(consumed.kcal, target?.kcal, "")}
             {cell(consumed.proteinG, target?.proteinG, "g")}

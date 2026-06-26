@@ -757,14 +757,16 @@ function ReadyPlan({ plan }: { plan: DietPlanDto }) {
               )}
               Generate shopping list
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => genBatch.mutate()}
-              disabled={genBatch.isPending}
-            >
-              {genBatch.isPending ? <Spinner /> : <CookingPot className="h-4 w-4" />}
-              Batch-cook guide
-            </Button>
+            {plan.blockSize > 1 ? (
+              <Button
+                variant="outline"
+                onClick={() => genBatch.mutate()}
+                disabled={genBatch.isPending}
+              >
+                {genBatch.isPending ? <Spinner /> : <CookingPot className="h-4 w-4" />}
+                Batch-cook guide
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               onClick={() => downloadPdf.mutate()}
