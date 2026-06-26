@@ -10,14 +10,14 @@
 ###############################################################################
 
 locals {
-  appinsights_resource_id  = azurerm_application_insights.main.id
+  appinsights_resource_id   = azurerm_application_insights.main.id
   log_analytics_resource_id = azurerm_log_analytics_workspace.main.id
 }
 
 # ── Workbook ────────────────────────────────────────────────────────────────── #
 
 resource "azurerm_application_insights_workbook" "nutriforge_ops" {
-  name                = "44444444-4444-4444-4444-${local.name_suffix}444444"  # deterministic GUID prefix
+  name                = "44444444-4444-4444-4444-${local.name_suffix}444444" # deterministic GUID prefix
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   display_name        = "NutriForge Operations"
@@ -25,11 +25,11 @@ resource "azurerm_application_insights_workbook" "nutriforge_ops" {
   tags                = local.tags
 
   data_json = templatefile("${path.module}/workbook-template.json", {
-    subscription_id    = data.azurerm_client_config.current.subscription_id
-    resource_group     = azurerm_resource_group.main.name
-    app_insights_name  = azurerm_application_insights.main.name
-    app_insights_id    = local.appinsights_resource_id
-    log_workspace_id   = local.log_analytics_resource_id
+    subscription_id   = data.azurerm_client_config.current.subscription_id
+    resource_group    = azurerm_resource_group.main.name
+    app_insights_name = azurerm_application_insights.main.name
+    app_insights_id   = local.appinsights_resource_id
+    log_workspace_id  = local.log_analytics_resource_id
   })
 }
 
@@ -78,7 +78,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "availability_fast_bur
   auto_mitigation_enabled = true
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       requests
       | where timestamp > ago(1h)
       | summarize
@@ -122,7 +122,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "availability_slow_bur
   auto_mitigation_enabled = true
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       requests
       | where timestamp > ago(6h)
       | summarize
@@ -166,7 +166,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "latency_p99_fast_burn
   auto_mitigation_enabled = true
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       requests
       | where timestamp > ago(1h)
       | where url !has "/diet-plan/generate"
@@ -212,7 +212,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "plan_latency_p95" {
   auto_mitigation_enabled = true
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       customMetrics
       | where timestamp > ago(1h)
       | where name == "nutriforge.plan.generation_duration"
@@ -253,7 +253,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "plan_feasibility" {
   auto_mitigation_enabled = true
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       customMetrics
       | where timestamp > ago(6h)
       | where name == "nutriforge.plan.generated"
@@ -298,7 +298,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "ai_budget_exhaustion"
   auto_mitigation_enabled = true
 
   criteria {
-    query = <<-KQL
+    query                   = <<-KQL
       customMetrics
       | where timestamp > ago(1h)
       | where name == "nutriforge.ai.turns"
