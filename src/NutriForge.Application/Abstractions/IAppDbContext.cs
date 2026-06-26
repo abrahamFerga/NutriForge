@@ -28,6 +28,7 @@ public interface IAppDbContext
     DbSet<PantryItem> PantryItems { get; }
     DbSet<ShoppingList> ShoppingLists { get; }
     DbSet<MealPlan> MealPlans { get; }
+    DbSet<DietTemplate> DietTemplates { get; }
     DbSet<ChannelMessage> ChannelMessages { get; }
     DbSet<ChannelSubscription> ChannelSubscriptions { get; }
     DbSet<AccountLinkToken> AccountLinkTokens { get; }

@@ -18,6 +18,8 @@ import type {
   DietPlanDto,
   ConsentStatus,
   ConsentType,
+  DietTemplate,
+  UpsertDietTemplateRequest,
   FoodDetail,
   FoodSummary,
   HouseholdMember,
@@ -488,6 +490,35 @@ export const dietPlansApi = {
       );
     }
     return response.blob();
+  },
+};
+
+// ---- Saved diet presets (#102) ----
+
+export const dietTemplatesApi = {
+  list(): Promise<DietTemplate[]> {
+    return request<DietTemplate[]>("/api/v1/diet-templates");
+  },
+  add(body: UpsertDietTemplateRequest): Promise<DietTemplate> {
+    return request<DietTemplate>("/api/v1/diet-templates", { method: "POST", body });
+  },
+  update(id: string, body: UpsertDietTemplateRequest): Promise<DietTemplate> {
+    return request<DietTemplate>(`/api/v1/diet-templates/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/diet-templates/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
+  /** One-tap regenerate from a saved preset (the saved household auto-attaches). Returns the new plan. */
+  generate(id: string): Promise<DietPlanDto> {
+    return request<DietPlanDto>(
+      `/api/v1/diet-templates/${encodeURIComponent(id)}/generate`,
+      { method: "POST", body: {} },
+    );
   },
 };
 

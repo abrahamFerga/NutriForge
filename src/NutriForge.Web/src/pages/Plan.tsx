@@ -27,7 +27,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { ErrorState } from "@/components/StateMessage";
 import { ShoppingList } from "@/components/ShoppingList";
 import { PantryPanel } from "@/components/PantryPanel";
-import { dietPlansApi, householdApi } from "@/lib/api";
+import { dietPlansApi, dietTemplatesApi, householdApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   AdherencePoint,
@@ -37,6 +37,7 @@ import type {
   DietPlanDto,
   DietPlanSlot,
   DietSlug,
+  DietTemplate,
   HouseholdMember,
   ShoppingListDto,
 } from "@/lib/types";
@@ -115,6 +116,46 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [blockSize, setBlockSize] = useState("1");
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [desire, setDesire] = useState("");
+  const [presetName, setPresetName] = useState("");
+
+  // Saved diet presets (#102): the user keeps making the same kind of plan, so load/save the parameters.
+  const templates = useQuery({ queryKey: queryKeys.dietTemplates, queryFn: dietTemplatesApi.list });
+
+  function applyTemplate(t: DietTemplate) {
+    setDietSlug((t.dietSlug as DietSlug | null) ?? "");
+    setKcalTarget(t.kcalTarget != null ? String(t.kcalTarget) : "");
+    setMaxPrep(t.maxPrepMinutes != null ? String(t.maxPrepMinutes) : "");
+    setDays(String(t.horizonDays));
+    setBlockSize(String(t.blockSize));
+    setDesire(t.desire ?? "");
+  }
+
+  const saveTemplate = useMutation({
+    mutationFn: (name: string) =>
+      dietTemplatesApi.add({
+        name,
+        dietSlug: dietSlug || null,
+        kcalTarget: kcalTarget.trim() ? Number(kcalTarget) : null,
+        maxPrepMinutes: maxPrep.trim() ? Number(maxPrep) : null,
+        horizonDays: Number(days) || 7,
+        blockSize: Number(blockSize) || 1,
+        desire: desire.trim() || null,
+      }),
+    onSuccess: () => {
+      setPresetName("");
+      queryClient.invalidateQueries({ queryKey: queryKeys.dietTemplates });
+    },
+  });
+
+  const generateTemplate = useMutation({
+    mutationFn: (id: string) => dietTemplatesApi.generate(id),
+    onSuccess: (plan) => onCreated(plan.id),
+  });
+
+  const deleteTemplate = useMutation({
+    mutationFn: (id: string) => dietTemplatesApi.remove(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.dietTemplates }),
+  });
 
   // Pre-fill "Cooking for" from the saved household so the partner/children the user always cooks for
   // are there without re-adding them (#100). Seed once, after the rows are still untouched-empty.
@@ -185,6 +226,72 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
         <CardTitle>Generate a plan</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Saved diet presets (#102): reuse the kind of plan you always make. */}
+        <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+          <Label>Saved diets</Label>
+          {templates.data && templates.data.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {templates.data.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center gap-1 rounded-full border border-slate-800 bg-slate-900/60 py-1 pr-1 pl-3 text-xs"
+                >
+                  <button
+                    type="button"
+                    className="font-medium text-slate-100 hover:text-brand-400"
+                    onClick={() => applyTemplate(t)}
+                    title="Load these settings into the form"
+                  >
+                    {t.name}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    title="Generate this diet now"
+                    onClick={() => generateTemplate.mutate(t.id)}
+                    disabled={generateTemplate.isPending}
+                    aria-label={`Generate ${t.name}`}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    title="Delete this preset"
+                    onClick={() => deleteTemplate.mutate(t.id)}
+                    aria-label={`Delete ${t.name}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              No saved diets yet — set up a plan below, then save the settings to reuse them in one tap.
+            </p>
+          )}
+          <div className="flex items-center gap-2">
+            <Input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="Name, e.g. 'My usual cut'"
+              className="h-9 text-xs"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!presetName.trim() || saveTemplate.isPending}
+              onClick={() => saveTemplate.mutate(presetName.trim())}
+            >
+              {saveTemplate.isPending ? <Spinner /> : <Bookmark className="h-4 w-4" />}
+              Save settings
+            </Button>
+          </div>
+        </div>
+
         <div className="space-y-1">
           <Label htmlFor="diet-slug">Diet</Label>
           <Select

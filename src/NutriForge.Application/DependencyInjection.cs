@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<DietGen.DietPlanGenerator>();
         services.AddScoped<DietGen.DietPlanService>();
         services.AddScoped<DietGen.HouseholdService>();
+        services.AddScoped<DietGen.DietTemplateService>();
 
         // Notifications: daily/weekly summary builders, log-reminder, channel (mock by default; swappable later),
         // and the opt-in subscription / secure account-link service.

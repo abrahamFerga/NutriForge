@@ -103,6 +103,7 @@ app.MapRecipeEndpoints();
 app.MapPlanningEndpoints();
 app.MapDietPlanEndpoints();
 app.MapHouseholdEndpoints();
+app.MapDietTemplateEndpoints();
 app.MapNotificationEndpoints();
 app.MapWhatsAppInboundEndpoints();
 

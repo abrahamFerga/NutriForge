@@ -525,6 +525,31 @@ export interface UpsertHouseholdMemberRequest {
   targetKcal?: number | null;
 }
 
+/** A saved diet-plan preset (#102) the user re-runs in one tap. */
+export interface DietTemplate {
+  id: string;
+  name: string;
+  dietSlug: string | null;
+  kcalTarget: number | null;
+  maxPrepMinutes: number | null;
+  mealsPerDay: number | null;
+  horizonDays: number;
+  blockSize: number;
+  desire: string | null;
+}
+
+/** Create/update a saved diet preset. */
+export interface UpsertDietTemplateRequest {
+  name: string;
+  dietSlug?: string | null;
+  kcalTarget?: number | null;
+  maxPrepMinutes?: number | null;
+  mealsPerDay?: number | null;
+  horizonDays?: number | null;
+  blockSize?: number | null;
+  desire?: string | null;
+}
+
 /** One additional person (the owner is added automatically). Omit targetKcal for "same as me". */
 export interface PlanMemberInput {
   name: string;

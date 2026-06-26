@@ -53,6 +53,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
     public DbSet<MealPlan> MealPlans => Set<MealPlan>();
+    public DbSet<Domain.Planning.DietTemplate> DietTemplates => Set<Domain.Planning.DietTemplate>();
     public DbSet<Domain.Notifications.ChannelMessage> ChannelMessages => Set<Domain.Notifications.ChannelMessage>();
     public DbSet<Domain.Notifications.ChannelSubscription> ChannelSubscriptions => Set<Domain.Notifications.ChannelSubscription>();
     public DbSet<Domain.Notifications.AccountLinkToken> AccountLinkTokens => Set<Domain.Notifications.AccountLinkToken>();
@@ -273,6 +274,18 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
             e.Property(m => m.Relationship).HasMaxLength(60);
             e.HasIndex(m => m.UserId);
             e.HasQueryFilter(m => m.UserId == CurrentUserId);
+        });
+
+        // Saved diet presets (#102): named generation parameters the user re-runs in one tap.
+        b.Entity<Domain.Planning.DietTemplate>(e =>
+        {
+            e.ToTable("diet_templates", "app");
+            e.HasKey(t => t.Id);
+            e.Property(t => t.Name).HasMaxLength(120).IsRequired();
+            e.Property(t => t.DietSlug).HasMaxLength(60);
+            e.Property(t => t.Desire).HasMaxLength(1000);
+            e.HasIndex(t => t.UserId);
+            e.HasQueryFilter(t => t.UserId == CurrentUserId);
         });
 
         b.Entity<AssistantSession>(e =>
