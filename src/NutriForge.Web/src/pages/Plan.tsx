@@ -10,6 +10,7 @@ import {
   CalendarRange,
   Check,
   ChefHat,
+  ChevronDown,
   CookingPot,
   FileDown,
   Flame,
@@ -29,7 +30,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { ErrorState } from "@/components/StateMessage";
 import { ShoppingList } from "@/components/ShoppingList";
 import { PantryPanel } from "@/components/PantryPanel";
-import { dietPlansApi, dietTemplatesApi, householdApi } from "@/lib/api";
+import { ApiError, dietPlansApi, dietTemplatesApi, householdApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   AdherencePoint,
@@ -43,7 +44,7 @@ import type {
   HouseholdMember,
   ShoppingListDto,
 } from "@/lib/types";
-import { round } from "@/lib/utils";
+import { cn, round } from "@/lib/utils";
 
 const DIET_SLUGS: { value: DietSlug | ""; label: string }[] = [
   { value: "", label: "No preference" },
@@ -59,7 +60,7 @@ export function Plan() {
     <div className="space-y-6">
       <PageHeading
         title="Diet plan"
-        subtitle="Generate a meal plan, then turn it into a shopping list"
+        subtitle="Tell us your goal — we'll write a full week of meals and the shopping list"
         icon={CalendarRange}
       />
 
@@ -75,7 +76,9 @@ export function Plan() {
           ) : (
             <Card>
               <CardContent className="py-16 text-center text-sm text-slate-500">
-                Configure your plan and generate to see results here.
+                Pick a diet (or don&apos;t) and tap{" "}
+                <span className="font-medium text-slate-300">Generate my plan</span> — your meals
+                appear here.
               </CardContent>
             </Card>
           )}
@@ -173,37 +176,31 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
     setMembers((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
   }
 
-  // Persist the current "Cooking for" rows as the user's saved household: add new ones, update changed
-  // ones, and delete any saved member they removed from the form.
-  const saveHousehold = useMutation({
-    mutationFn: async () => {
-      const saved = household.data ?? [];
-      const named = members.filter((m) => m.name.trim().length > 0);
-      const keptIds = new Set(named.map((m) => m.id).filter(Boolean));
-
-      await Promise.all(
-        saved
-          .filter((s) => !keptIds.has(s.id))
-          .map((s) => householdApi.remove(s.id)),
-      );
-      await Promise.all(
-        named.map((m) => {
-          const body = {
-            name: m.name.trim(),
-            relationship: m.relationship ?? null,
-            targetKcal: m.mode === "own" ? Number(m.kcal) || null : null,
-          };
-          return m.id ? householdApi.update(m.id, body) : householdApi.add(body);
-        }),
-      );
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.household }),
-  });
+  // Silently keep the saved household in sync with the "Cooking for" rows, so adding someone once
+  // means they're remembered for every future plan (and removing them forgets them). #100
+  async function syncHousehold() {
+    const saved = household.data ?? [];
+    const named = members.filter((m) => m.name.trim().length > 0);
+    const keptIds = new Set(named.map((m) => m.id).filter(Boolean));
+    await Promise.all(
+      saved.filter((s) => !keptIds.has(s.id)).map((s) => householdApi.remove(s.id)),
+    );
+    await Promise.all(
+      named.map((m) => {
+        const body = {
+          name: m.name.trim(),
+          relationship: m.relationship ?? null,
+          targetKcal: m.mode === "own" ? Number(m.kcal) || null : null,
+        };
+        return m.id ? householdApi.update(m.id, body) : householdApi.add(body);
+      }),
+    );
+    queryClient.invalidateQueries({ queryKey: queryKeys.household });
+  }
 
   function buildPlanBody(): CreateDietPlanRequest {
     const body: CreateDietPlanRequest = { horizonDays: Number(days) || 7 };
-    // Always send the explicit set the form shows (even empty = just me). The pre-fill already
-    // reflects the saved household, so this respects "remove a row to cook for just yourself".
+    // Always send the explicit set the form shows (even empty = just me).
     body.members = members
       .filter((m) => m.name.trim().length > 0)
       .map((m) => ({
@@ -218,23 +215,34 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
     return body;
   }
 
-  const create = useMutation({
-    mutationFn: () => dietPlansApi.create(buildPlanBody()),
-    onSuccess: (plan) => onCreated(plan.id),
-  });
-
-  // "Make me a full diet" (#101): the agent generates recipes to fill the pool, then plans.
   const [autoNote, setAutoNote] = useState<string | null>(null);
-  const autoCreate = useMutation({
-    mutationFn: () => dietPlansApi.auto(buildPlanBody()),
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  // ONE button. The AI writes the recipes and the whole plan; if no AI provider is configured it
+  // transparently falls back to building from existing recipes — so it always just works.
+  const generate = useMutation({
+    mutationFn: async () => {
+      await syncHousehold();
+      const body = buildPlanBody();
+      try {
+        const res = await dietPlansApi.auto(body);
+        return { planId: res.plan.id, generated: res.recipesGenerated };
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 503) {
+          const plan = await dietPlansApi.create(body);
+          return { planId: plan.id, generated: 0 };
+        }
+        throw e;
+      }
+    },
     onSuccess: (res) => {
       setAutoNote(
-        res.recipesGenerated > 0
-          ? `Generated ${res.recipesGenerated} new recipe${res.recipesGenerated === 1 ? "" : "s"} for your plan.`
-          : "Used your existing recipes.",
+        res.generated > 0
+          ? `Wrote ${res.generated} new recipe${res.generated === 1 ? "" : "s"} for your plan.`
+          : null,
       );
       queryClient.invalidateQueries({ queryKey: queryKeys.recipes });
-      onCreated(res.plan.id);
+      onCreated(res.planId);
     },
   });
 
@@ -244,72 +252,7 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
         <CardTitle>Generate a plan</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Saved diet presets (#102): reuse the kind of plan you always make. */}
-        <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-          <Label>Saved diets</Label>
-          {templates.data && templates.data.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {templates.data.map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center gap-1 rounded-full border border-slate-800 bg-slate-900/60 py-1 pr-1 pl-3 text-xs"
-                >
-                  <button
-                    type="button"
-                    className="font-medium text-slate-100 hover:text-brand-400"
-                    onClick={() => applyTemplate(t)}
-                    title="Load these settings into the form"
-                  >
-                    {t.name}
-                  </button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    title="Generate this diet now"
-                    onClick={() => generateTemplate.mutate(t.id)}
-                    disabled={generateTemplate.isPending}
-                    aria-label={`Generate ${t.name}`}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    title="Delete this preset"
-                    onClick={() => deleteTemplate.mutate(t.id)}
-                    aria-label={`Delete ${t.name}`}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              No saved diets yet — set up a plan below, then save the settings to reuse them in one tap.
-            </p>
-          )}
-          <div className="flex items-center gap-2">
-            <Input
-              value={presetName}
-              onChange={(e) => setPresetName(e.target.value)}
-              placeholder="Name, e.g. 'My usual cut'"
-              className="h-9 text-xs"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!presetName.trim() || saveTemplate.isPending}
-              onClick={() => saveTemplate.mutate(presetName.trim())}
-            >
-              {saveTemplate.isPending ? <Spinner /> : <Bookmark className="h-4 w-4" />}
-              Save settings
-            </Button>
-          </div>
-        </div>
-
+        {/* Diet — the one choice worth making up front. */}
         <div className="space-y-1">
           <Label htmlFor="diet-slug">Diet</Label>
           <Select
@@ -325,188 +268,255 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
           </Select>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="kcal-target">Calorie target (optional)</Label>
-            <Input
-              id="kcal-target"
-              type="number"
-              min={0}
-              value={kcalTarget}
-              onChange={(e) => setKcalTarget(e.target.value)}
-              placeholder="e.g. 2200"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="max-prep">Max prep min (optional)</Label>
-            <Input
-              id="max-prep"
-              type="number"
-              min={0}
-              value={maxPrep}
-              onChange={(e) => setMaxPrep(e.target.value)}
-              placeholder="e.g. 30"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="days">Days</Label>
-            <Input
-              id="days"
-              type="number"
-              min={1}
-              max={30}
-              value={days}
-              onChange={(e) => setDays(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="block-size">Cook every (days)</Label>
-            <Input
-              id="block-size"
-              type="number"
-              min={1}
-              max={Number(days) || 30}
-              value={blockSize}
-              onChange={(e) => setBlockSize(e.target.value)}
-            />
-            <p className="text-[11px] text-slate-500">
-              Batch-cook: 1 = fresh daily; 3 = cook once, eat 3 days.
-            </p>
-          </div>
-        </div>
-
+        {/* Cooking for — one line for the common case; expands only when you add someone. */}
         <div className="space-y-2">
           <Label>Cooking for</Label>
-          <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
-            <Users className="h-4 w-4 text-slate-500" />
-            <span className="font-medium text-slate-100">You</span>
-            <span className="text-xs text-slate-500">· your target</span>
-          </div>
-
-          {members.map((m, i) => (
-            <div
-              key={i}
-              className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2"
-            >
-              <div className="flex items-center gap-2">
-                <Input
-                  value={m.name}
-                  onChange={(e) => updateMember(i, { name: e.target.value })}
-                  placeholder="e.g. Girlfriend"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setMembers((prev) => prev.filter((_, idx) => idx !== i))}
-                  aria-label="Remove person"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={m.mode}
-                  onChange={(e) => updateMember(i, { mode: e.target.value as "same" | "own" })}
-                >
-                  <option value="same">Same as me</option>
-                  <option value="own">Own calorie target</option>
-                </Select>
-                {m.mode === "own" ? (
-                  <Input
-                    type="number"
-                    min={800}
-                    max={6000}
-                    value={m.kcal}
-                    onChange={(e) => updateMember(i, { kcal: e.target.value })}
-                    placeholder="kcal"
-                    className="w-32"
-                  />
-                ) : null}
-              </div>
+          {members.length === 0 ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
+              <span className="flex items-center gap-2 text-slate-100">
+                <Users className="h-4 w-4 text-slate-500" /> Just me
+              </span>
+              <button
+                type="button"
+                className="text-xs font-medium text-brand-400 hover:text-brand-300"
+                onClick={() => setMembers([{ name: "", mode: "same", kcal: "" }])}
+              >
+                + Add someone
+              </button>
             </div>
-          ))}
+          ) : (
+            <>
+              <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-3 py-2 text-sm">
+                <Users className="h-4 w-4 text-slate-500" />
+                <span className="font-medium text-slate-100">You</span>
+              </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setMembers((prev) => [...prev, { name: "", mode: "same", kcal: "" }])}
-            >
-              <Plus className="h-4 w-4" />
-              Add person
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => saveHousehold.mutate()}
-              disabled={saveHousehold.isPending}
-              title="Save these people so they're added to every plan automatically"
-            >
-              {saveHousehold.isPending ? (
-                <Spinner />
-              ) : saveHousehold.isSuccess ? (
-                <Check className="h-4 w-4 text-brand-400" />
-              ) : (
-                <Bookmark className="h-4 w-4" />
-              )}
-              {saveHousehold.isSuccess ? "Saved to household" : "Save as my household"}
-            </Button>
-          </div>
-          <p className="text-xs text-slate-500">
-            Everyone eats the same meals; each person&apos;s portion scales to their target.
-            {household.data && household.data.length > 0
-              ? " Your saved household is pre-filled here — edit freely, then re-save."
-              : " Save your household once and we'll add them to every plan automatically."}
-          </p>
+              {members.map((m, i) => (
+                <div
+                  key={i}
+                  className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={m.name}
+                      onChange={(e) => updateMember(i, { name: e.target.value })}
+                      placeholder="e.g. Fiancée"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setMembers((prev) => prev.filter((_, idx) => idx !== i))}
+                      aria-label="Remove person"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={m.mode}
+                      onChange={(e) => updateMember(i, { mode: e.target.value as "same" | "own" })}
+                    >
+                      <option value="same">Same calories as me</option>
+                      <option value="own">Their own calorie goal</option>
+                    </Select>
+                    {m.mode === "own" ? (
+                      <Input
+                        type="number"
+                        min={800}
+                        max={6000}
+                        value={m.kcal}
+                        onChange={(e) => updateMember(i, { kcal: e.target.value })}
+                        placeholder="kcal"
+                        className="w-32"
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMembers((prev) => [...prev, { name: "", mode: "same", kcal: "" }])}
+              >
+                <Plus className="h-4 w-4" />
+                Add another
+              </Button>
+              <p className="text-xs text-slate-500">
+                Everyone eats the same meals, portioned to each person. We&apos;ll remember them for next time.
+              </p>
+            </>
+          )}
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="desire">Free-text desire (optional)</Label>
-          <textarea
-            id="desire"
-            value={desire}
-            onChange={(e) => setDesire(e.target.value)}
-            rows={2}
-            placeholder="e.g. 'Mediterranean, lots of fish'"
-            className="flex w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30 focus-visible:outline-none"
-          />
-          <p className="text-xs text-slate-500">
-            Free-text needs an LLM key; the structured fields always work.
-          </p>
-        </div>
+        {generate.isError ? <ErrorState error={generate.error} /> : null}
 
-        {create.isError ? <ErrorState error={create.error} /> : null}
-        {autoCreate.isError ? <ErrorState error={autoCreate.error} /> : null}
-
+        {/* The one primary action — the AI writes the recipes and the whole plan. */}
         <Button
-          onClick={() => create.mutate()}
-          disabled={create.isPending || autoCreate.isPending}
-          className="w-full"
-        >
-          {create.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
-          Generate plan
-        </Button>
-
-        {/* The headline #101 action: let the agent author the recipes too. */}
-        <Button
-          variant="outline"
           onClick={() => {
             setAutoNote(null);
-            autoCreate.mutate();
+            generate.mutate();
           }}
-          disabled={create.isPending || autoCreate.isPending}
+          disabled={generate.isPending}
           className="w-full"
         >
-          {autoCreate.isPending ? <Spinner /> : <ChefHat className="h-4 w-4" />}
-          Make me a full diet with AI
+          {generate.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+          Generate my plan
         </Button>
-        <p className="text-xs text-slate-500">
-          No recipes to add yourself — the assistant writes the recipes and prep steps, then builds your
-          plan. {autoNote ? <span className="text-brand-400">{autoNote}</span> : null}
+        <p className="text-center text-xs text-slate-500">
+          We&apos;ll write the recipes and a full week of meals for you.
+          {autoNote ? <span className="text-brand-400"> {autoNote}</span> : null}
         </p>
+
+        {/* Everything advanced lives behind one quiet toggle. */}
+        <div className="border-t border-slate-800 pt-3">
+          <button
+            type="button"
+            onClick={() => setCustomizeOpen((v) => !v)}
+            className="flex w-full items-center justify-between text-sm font-medium text-slate-300 hover:text-slate-100"
+            aria-expanded={customizeOpen}
+          >
+            Customize
+            <ChevronDown
+              className={cn("h-4 w-4 transition-transform", customizeOpen && "rotate-180")}
+            />
+          </button>
+          {!customizeOpen ? (
+            <p className="mt-1 text-xs text-slate-500">
+              Using sensible defaults — 7 days, fresh daily, your calorie goal.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="kcal-target">Calorie goal</Label>
+                  <Input
+                    id="kcal-target"
+                    type="number"
+                    min={0}
+                    value={kcalTarget}
+                    onChange={(e) => setKcalTarget(e.target.value)}
+                    placeholder="Your target"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="max-prep">Max cooking time (min)</Label>
+                  <Input
+                    id="max-prep"
+                    type="number"
+                    min={0}
+                    value={maxPrep}
+                    onChange={(e) => setMaxPrep(e.target.value)}
+                    placeholder="Any"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="days">Days to plan</Label>
+                  <Input
+                    id="days"
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="batch">Cooking style</Label>
+                  <Select
+                    id="batch"
+                    value={Number(blockSize) > 1 ? "batch" : "daily"}
+                    onChange={(e) => setBlockSize(e.target.value === "batch" ? "3" : "1")}
+                  >
+                    <option value="daily">Cook fresh daily</option>
+                    <option value="batch">Cook once for several days</option>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="desire">Anything else? (optional)</Label>
+                <textarea
+                  id="desire"
+                  value={desire}
+                  onChange={(e) => setDesire(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. lots of fish, Mediterranean"
+                  className="flex w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30 focus-visible:outline-none"
+                />
+              </div>
+
+              {/* Saved diets — power-user reuse, out of the default view. */}
+              <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                <Label>Saved diets</Label>
+                {templates.data && templates.data.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {templates.data.map((t) => (
+                      <div
+                        key={t.id}
+                        className="flex items-center gap-1 rounded-full border border-slate-800 bg-slate-900/60 py-1 pr-1 pl-3 text-xs"
+                      >
+                        <button
+                          type="button"
+                          className="font-medium text-slate-100 hover:text-brand-400"
+                          onClick={() => applyTemplate(t)}
+                          title="Load these settings"
+                        >
+                          {t.name}
+                        </button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Generate this diet now"
+                          onClick={() => generateTemplate.mutate(t.id)}
+                          disabled={generateTemplate.isPending}
+                          aria-label={`Generate ${t.name}`}
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Delete this saved diet"
+                          onClick={() => deleteTemplate.mutate(t.id)}
+                          aria-label={`Delete ${t.name}`}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Save these settings to reuse this diet in one tap next time.
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    placeholder="Name, e.g. 'My usual cut'"
+                    className="h-9 text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!presetName.trim() || saveTemplate.isPending}
+                    onClick={() => saveTemplate.mutate(presetName.trim())}
+                  >
+                    {saveTemplate.isPending ? <Spinner /> : <Bookmark className="h-4 w-4" />}
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

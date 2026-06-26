@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   LogOut,
   MessageCircle,
-  Sparkles,
   User,
   Utensils,
 } from "lucide-react";
@@ -95,9 +94,6 @@ export function AppShell() {
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto px-3 text-xs text-slate-600">
-          NutriForge · v0.1
-        </div>
       </aside>
 
       {/* Main column */}
@@ -155,15 +151,10 @@ function Brand() {
       <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-teal-500 text-slate-950 shadow-lg shadow-brand-500/30 ring-1 ring-white/10">
         <Utensils className="h-5 w-5" />
       </span>
-      <div className="leading-tight">
-        <p className="text-base font-bold tracking-tight">
-          <span className="nf-gradient-text">Nutri</span>
-          <span className="text-slate-100">Forge</span>
-        </p>
-        <p className="flex items-center gap-1 text-[0.7rem] font-medium tracking-wide text-slate-500">
-          <Sparkles className="h-3 w-3 text-brand-400" /> Enterprise Nutrition
-        </p>
-      </div>
+      <p className="text-lg font-bold tracking-tight">
+        <span className="nf-gradient-text">Nutri</span>
+        <span className="text-slate-100">Forge</span>
+      </p>
     </div>
   );
 }
@@ -184,12 +175,6 @@ function TopBar() {
       <div className="flex items-center gap-2">
         <LanguageSwitcher />
         <ThemeToggle />
-        <div className="flex items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-900/60 px-2.5 py-1.5">
-          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-teal-500 text-xs font-bold text-slate-950">
-            D
-          </span>
-          <span className="text-sm text-slate-300">demo-user</span>
-        </div>
         {authEnabled ? (
           <button
             onClick={() => logout()}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowRight, Check, Search, Sparkles, Utensils } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Search, Sparkles, Utensils } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,7 @@ import {
   type Sex,
 } from "@/lib/types";
 import { dismissOnboarding } from "@/lib/onboarding";
-import { round, today } from "@/lib/utils";
+import { cn, round, today } from "@/lib/utils";
 
 /**
  * First-run onboarding (#68): profile → first target → first logged food, so a new user reaches value
@@ -67,12 +67,6 @@ export function Onboarding() {
         ) : (
           <FirstFoodStep onFinish={finish} />
         )}
-
-        <div className="text-center">
-          <button onClick={finish} className="text-xs text-slate-500 hover:text-slate-300">
-            Skip for now
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -119,11 +113,11 @@ const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
 };
 
 const GOAL_LABELS: Record<Goal, string> = {
-  AggressiveCut: "Aggressive cut",
-  ModerateCut: "Moderate cut",
-  Maintain: "Maintain",
-  LeanBulk: "Lean bulk",
-  Bulk: "Bulk",
+  AggressiveCut: "Lose weight fast",
+  ModerateCut: "Lose weight",
+  Maintain: "Maintain weight",
+  LeanBulk: "Gain muscle",
+  Bulk: "Gain weight",
 };
 
 function ProfileStep({ onDone }: { onDone: () => void }) {
@@ -134,13 +128,10 @@ function ProfileStep({ onDone }: { onDone: () => void }) {
   const [weightKg, setWeightKg] = useState("75");
   const [activity, setActivity] = useState<ActivityLevel>("ModeratelyActive");
   const [goal, setGoal] = useState<Goal>("Maintain");
-  // GDPR consent captured at signup (#58): the required block must be accepted; marketing is optional.
-  const [agreed, setAgreed] = useState(false);
-  const [marketing, setMarketing] = useState(false);
+  const [personalize, setPersonalize] = useState(false);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!agreed) return;
     save.mutate(
       {
         sex,
@@ -159,12 +150,11 @@ function ProfileStep({ onDone }: { onDone: () => void }) {
       {
         onSuccess: async () => {
           try {
-            // Record the consents granted at signup. Non-fatal if it fails — the Profile page can manage them.
+            // Consent is given implicitly by continuing (#58). Non-fatal if recording fails.
             await Promise.all([
               consentApi.record("TermsOfService", true),
               consentApi.record("PrivacyPolicy", true),
               consentApi.record("HealthDataProcessing", true),
-              consentApi.record("Marketing", marketing),
             ]);
           } catch {
             /* consent can be managed later under Profile → Privacy & consent */
@@ -217,56 +207,54 @@ function ProfileStep({ onDone }: { onDone: () => void }) {
                 required
               />
             </Field>
-            <Field label="Activity level">
-              <Select value={activity} onChange={(e) => setActivity(e.target.value as ActivityLevel)}>
-                {ACTIVITY_LEVELS.map((a) => (
-                  <option key={a} value={a}>
-                    {ACTIVITY_LABELS[a]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Goal">
-              <Select value={goal} onChange={(e) => setGoal(e.target.value as Goal)}>
-                {GOALS.map((g) => (
-                  <option key={g} value={g}>
-                    {GOAL_LABELS[g]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
           </div>
 
-          <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
-            <label className="flex items-start gap-2 text-xs text-slate-300">
-              <input
-                type="checkbox"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+          {/* Activity + Goal default sensibly; only the curious need to touch them. */}
+          <div>
+            <button
+              type="button"
+              onClick={() => setPersonalize((v) => !v)}
+              className="flex w-full items-center justify-between text-sm font-medium text-slate-300 hover:text-slate-100"
+              aria-expanded={personalize}
+            >
+              Personalize my target (optional)
+              <ChevronDown
+                className={cn("h-4 w-4 transition-transform", personalize && "rotate-180")}
               />
-              <span>
-                I agree to the Terms of Service and Privacy Policy, and I consent to NutriForge processing my
-                health-related data (weight, body metrics) to compute my nutrition targets.
-              </span>
-            </label>
-            <label className="flex items-start gap-2 text-xs text-slate-400">
-              <input
-                type="checkbox"
-                checked={marketing}
-                onChange={(e) => setMarketing(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
-              />
-              <span>Send me occasional product news and tips (optional).</span>
-            </label>
+            </button>
+            {personalize ? (
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <Field label="How active are you?">
+                  <Select value={activity} onChange={(e) => setActivity(e.target.value as ActivityLevel)}>
+                    {ACTIVITY_LEVELS.map((a) => (
+                      <option key={a} value={a}>
+                        {ACTIVITY_LABELS[a]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="What's your goal?">
+                  <Select value={goal} onChange={(e) => setGoal(e.target.value as Goal)}>
+                    {GOALS.map((g) => (
+                      <option key={g} value={g}>
+                        {GOAL_LABELS[g]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
           </div>
 
           {save.isError ? <ErrorState error={save.error} /> : null}
 
-          <Button type="submit" disabled={save.isPending || !agreed} className="w-full">
+          <Button type="submit" disabled={save.isPending} className="w-full">
             {save.isPending ? <Spinner /> : <ArrowRight className="h-4 w-4" />}
             Calculate my target
           </Button>
+          <p className="text-center text-xs text-slate-500">
+            By continuing you agree to our Terms and Privacy Policy.
+          </p>
         </form>
       </CardContent>
     </Card>
@@ -303,7 +291,7 @@ function TargetStep({ onBack, onDone }: { onBack: () => void; onDone: () => void
               <Metric label="Carbs" value={`${round(targets.data.carbG)}`} unit="g" />
             </div>
             <p className="text-center text-xs text-slate-500">
-              Computed from your profile ({targets.data.formula}). You can fine-tune anytime in Profile.
+              Computed just for you. You can fine-tune anytime in Profile.
             </p>
           </>
         ) : (

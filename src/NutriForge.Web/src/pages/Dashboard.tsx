@@ -13,10 +13,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, Flame, LayoutDashboard, Percent, Target } from "lucide-react";
+import { Flame, LayoutDashboard, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonClasses } from "@/components/ui/button";
-import { PageHeading, StatTile } from "@/components/PageHeading";
+import { PageHeading } from "@/components/PageHeading";
 import { MacroBar } from "@/components/MacroBar";
 import { WeightCard } from "@/components/WeightCard";
 import { HydrationCard } from "@/components/HydrationCard";
@@ -73,20 +73,31 @@ export function Dashboard() {
 
   const ringData = [{ name: "kcal", value: ringPct, fill: "var(--color-brand-500)" }];
 
-  const proteinConsumed = round(consumed.proteinG);
-  const proteinTarget = round(target.proteinG);
-
   return (
     <div className="space-y-6">
-      <PageHeading title="Dashboard" subtitle="Today at a glance" icon={LayoutDashboard} />
+      <PageHeading
+        title="Dashboard"
+        subtitle="Today at a glance"
+        icon={LayoutDashboard}
+        action={
+          <Link to="/diary" className={buttonClasses("primary", "md")}>
+            <Plus className="h-4 w-4" />
+            Log food
+          </Link>
+        }
+      />
 
-      {/* KPI tiles */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="Eaten" value={kcalConsumed} unit="kcal" icon={Flame} />
-        <StatTile label="Remaining" value={remaining} unit="kcal" icon={Target} accent />
-        <StatTile label="Protein" value={`${proteinConsumed}/${proteinTarget}`} unit="g" icon={Activity} />
-        <StatTile label="Of target" value={Math.round(ringPct)} unit="%" icon={Percent} />
-      </div>
+      {kcalConsumed === 0 ? (
+        <Link
+          to="/diary"
+          className="nf-card nf-hover flex items-center justify-between gap-3 px-4 py-3 text-sm"
+        >
+          <span className="text-slate-300">
+            Nothing logged yet today — add your first meal.
+          </span>
+          <span className="font-medium text-brand-400">Log food →</span>
+        </Link>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Calorie ring */}
@@ -156,9 +167,6 @@ export function Dashboard() {
               target={target.carbG}
               colorClass="bg-sky-400"
             />
-            <p className="pt-1 text-xs text-slate-500">
-              Targets via {target.formula}
-            </p>
           </CardContent>
         </Card>
       </div>
