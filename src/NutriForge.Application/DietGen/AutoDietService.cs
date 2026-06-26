@@ -1,32 +1,31 @@
-using Microsoft.EntityFrameworkCore;
 using NutriForge.Application.Abstractions;
 using NutriForge.Application.Recipes;
 using NutriForge.Application.Tracking;
-using NutriForge.Domain.Recipes;
 
 namespace NutriForge.Application.DietGen;
 
-/// <summary>The plan plus how many recipes the agent had to generate to fill the pool.</summary>
+/// <summary>The plan plus how many recipes the agent wrote for it.</summary>
 public sealed record AutoDietResult(DietPlanDto Plan, int RecipesGenerated);
 
 /// <summary>
-/// The headline "make me a full diet" flow (#101): when the catalog doesn't hold enough diet-compatible,
-/// nutrition-computed recipes to build a varied plan, the agent generates the shortfall (full recipes with
-/// prep steps, resolved deterministically), then the normal deterministic planner runs over the enriched
-/// pool. The user authors nothing. Owner-scoped; generated recipes are owned by the caller and reusable.
+/// The headline "make me a full diet" flow (#101): the agent writes a fresh, varied set of recipes FOR
+/// THIS plan and the deterministic planner builds the week from EXACTLY those — it never reads the user's
+/// recipe catalog and never pollutes it. The generated recipes are owned by the user (so the plan can
+/// reference them) but tagged plan-generated, so they stay out of the Recipes browser. The user authors
+/// nothing and never curates a recipe list. Owner-scoped.
 /// </summary>
 public sealed class AutoDietService(
     DietPlanService plans,
     RecipeGenerationService recipeGen,
-    ICatalogDbContext catalog,
     TargetService targets,
     ProfileService profiles)
 {
-    /// <summary>How many qualifying recipes we aim to have per meal before planning (variety headroom).</summary>
-    private const int PerMealTarget = 3;
+    /// <summary>Distinct recipes to write per meal type (scaled by horizon, then clamped) for weekly variety.</summary>
+    private const int MinPerMealType = 2;
+    private const int MaxPerMealType = 4;
 
-    /// <summary>Hard cap on recipes generated in one auto-diet call (cost / latency guard).</summary>
-    private const int MaxGenerate = 12;
+    /// <summary>Hard cap on recipes written for one plan (cost / latency guard).</summary>
+    private const int MaxGenerate = 16;
 
     public bool IsConfigured => recipeGen.IsConfigured;
 
@@ -34,26 +33,28 @@ public sealed class AutoDietService(
     {
         ArgumentNullException.ThrowIfNull(req);
 
-        var generated = 0;
-        if (recipeGen.IsConfigured)
+        if (!recipeGen.IsConfigured)
         {
-            generated = await EnsurePoolAsync(userId, req, ct).ConfigureAwait(false);
+            // No AI provider → best-effort over whatever recipes already exist (the only option).
+            var fallback = await plans.CreateAsync(userId, req, ct: ct).ConfigureAwait(false);
+            return new AutoDietResult(fallback, 0);
         }
 
-        // Run the same deterministic pipeline the normal flow uses — it re-queries the (now enriched)
-        // catalog, so the freshly generated recipes are included, and the saved household still attaches.
-        var plan = await plans.CreateAsync(userId, req, ct).ConfigureAwait(false);
-        return new AutoDietResult(plan, generated);
+        var freshIds = await GenerateFreshAsync(userId, req, ct).ConfigureAwait(false);
+        // Build the plan from ONLY the recipes we just wrote — the user's catalog is never read.
+        var plan = await plans.CreateAsync(userId, req, freshIds, ct).ConfigureAwait(false);
+        return new AutoDietResult(plan, freshIds.Count);
     }
 
-    /// <summary>Generate recipes (distributed across meal types) until the diet-compatible pool is deep enough.</summary>
-    private async Task<int> EnsurePoolAsync(Guid userId, CreateDietPlanRequest req, CancellationToken ct)
+    /// <summary>Write a fresh, varied set of recipes for the plan and return their ids.</summary>
+    private async Task<IReadOnlyCollection<Guid>> GenerateFreshAsync(Guid userId, CreateDietPlanRequest req, CancellationToken ct)
     {
         var target = await targets.GetAsync(userId, ct).ConfigureAwait(false);
         var profile = await profiles.GetAsync(userId, ct).ConfigureAwait(false);
 
         var kcal = req.KcalTarget ?? target?.Kcal ?? 2000;
         var mealsPerDay = Math.Clamp(req.MealsPerDay ?? 3, 1, 6);
+        var horizon = Math.Clamp(req.HorizonDays ?? 7, 1, 30);
 
         var exclude = AllergenOntology
             .Expand((req.ExcludeAllergens ?? []).Concat(profile?.Allergens ?? []))
@@ -61,42 +62,30 @@ public sealed class AutoDietService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        // How many qualifying recipes do we already have?
-        var recipes = await catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
-            .Where(r => r.IsNutritionComputed).ToListAsync(ct).ConfigureAwait(false);
-        var diet = string.IsNullOrWhiteSpace(req.DietSlug)
-            ? null
-            : await catalog.DietTypes.AsNoTracking().FirstOrDefaultAsync(d => d.Slug == req.DietSlug, ct).ConfigureAwait(false);
-
-        var intent = new DietIntent(kcal, null, req.DietSlug, [.. exclude], req.MaxPrepMinutes, mealsPerDay, 1);
-        var have = RecipeFilter.Filter(recipes, intent, diet).Count;
-
-        var need = Math.Min(MaxGenerate, Math.Max(0, (mealsPerDay * PerMealTarget) - have));
-        if (need == 0)
-        {
-            return 0;
-        }
-
         var mealTypes = MealTypesFor(mealsPerDay);
-        var perType = (int)Math.Ceiling(need / (double)mealTypes.Length);
+        // More days ⇒ more distinct recipes per meal so the week doesn't keep repeating (clamped + capped).
+        var perType = Math.Clamp((horizon + 1) / 2, MinPerMealType, MaxPerMealType);
+        var total = Math.Min(MaxGenerate, perType * mealTypes.Length);
         var perServingKcal = kcal / mealsPerDay;
         IReadOnlyList<string>? forceTags = string.IsNullOrWhiteSpace(req.DietSlug) ? null : [req.DietSlug];
 
-        var generated = 0;
+        var ids = new List<Guid>(total);
         foreach (var mealType in mealTypes)
         {
-            if (generated >= need)
+            if (ids.Count >= total)
             {
                 break;
             }
 
-            var batch = Math.Min(perType, need - generated);
+            var batch = Math.Min(perType, total - ids.Count);
             var brief = new RecipeBrief(mealType, req.DietSlug, perServingKcal, req.MaxPrepMinutes, exclude, req.Desire, Servings: 4);
-            var created = await recipeGen.GenerateAsync(userId, brief, batch, forceTags, ct).ConfigureAwait(false);
-            generated += created.Count;
+            var created = await recipeGen
+                .GenerateAsync(userId, brief, batch, forceTags, RecipeGenerationService.PlanGeneratedSource, ct)
+                .ConfigureAwait(false);
+            ids.AddRange(created.Select(r => r.Id));
         }
 
-        return generated;
+        return ids;
     }
 
     private static string[] MealTypesFor(int mealsPerDay)

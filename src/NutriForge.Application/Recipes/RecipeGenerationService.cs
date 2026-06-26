@@ -15,6 +15,16 @@ public sealed record GenerateRecipesRequest(
 /// </summary>
 public sealed class RecipeGenerationService(RecipeService recipes, IRecipeGenAgent agent)
 {
+    /// <summary>SourceType for recipes the user adds to their catalog via "Generate with AI" on Recipes.</summary>
+    public const string CatalogSource = "ai-generated";
+
+    /// <summary>
+    /// SourceType for recipes the agent writes FOR a single diet plan. These are owned by the user (so the
+    /// plan can reference them) but hidden from the Recipes catalog list, so generating a plan never
+    /// pollutes the recipe browser.
+    /// </summary>
+    public const string PlanGeneratedSource = "plan-generated";
+
     public bool IsConfigured => agent.IsConfigured;
 
     /// <summary>
@@ -23,7 +33,7 @@ public sealed class RecipeGenerationService(RecipeService recipes, IRecipeGenAge
     /// </summary>
     public async Task<IReadOnlyList<RecipeDto>> GenerateAsync(
         Guid ownerUserId, RecipeBrief brief, int count,
-        IReadOnlyList<string>? extraTags = null, CancellationToken ct = default)
+        IReadOnlyList<string>? extraTags = null, string sourceType = CatalogSource, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brief);
         if (!agent.IsConfigured)
@@ -49,7 +59,7 @@ public sealed class RecipeGenerationService(RecipeService recipes, IRecipeGenAge
                 Instructions: d.Instructions,
                 Tags: tags,
                 Ingredients: [.. d.Ingredients.Select(i => new RecipeIngredientInput(i.Quantity ?? 0, i.Unit, i.Name, i.RawText))],
-                SourceType: "ai-generated");
+                SourceType: sourceType);
 
             created.Add(await recipes.CreateAsync(req, ownerUserId, ct).ConfigureAwait(false));
         }

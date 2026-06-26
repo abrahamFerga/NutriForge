@@ -11,9 +11,10 @@ using NutriForge.Infrastructure.Persistence;
 namespace NutriForge.Application.Tests;
 
 /// <summary>
-/// The headline "make me a full diet" flow (#101 slice 3): when the catalog is too thin, the agent
-/// generates diet-compatible recipes (with prep steps, resolved nutrition), then the deterministic planner
-/// runs over the enriched pool. No live model — a fake agent supplies recipes.
+/// The headline "make me a full diet" flow (#101): the agent writes a fresh, varied set of recipes FOR
+/// the plan and the planner builds the week from EXACTLY those — it never reads the user's recipe catalog
+/// and never pollutes it (the recipes are tagged plan-generated and hidden from the Recipes list).
+/// No live model — a fake agent supplies recipes.
 /// </summary>
 public sealed class AutoDietTests
 {
@@ -37,7 +38,7 @@ public sealed class AutoDietTests
             var list = Enumerable.Range(0, count).Select(_ =>
             {
                 var id = ++_n;
-                return new ExtractedRecipe($"{brief.MealType} bowl {id}", 2, 20, "1. Cook chicken. 2. Serve over rice.",
+                return new ExtractedRecipe($"Fresh {brief.MealType} bowl {id}", 2, 20, "1. Cook chicken. 2. Serve over rice.",
                     ["dinner"],
                     [
                         new("200 g chicken breast", "chicken breast", 200, "g"),
@@ -56,7 +57,7 @@ public sealed class AutoDietTests
         var shopping = new ShoppingListService(db, db);
         var plans = new DietPlanService(db, db, targets, profiles, new NoOpIntentParser(), generator, shopping, Clock);
         var recipeGen = new RecipeGenerationService(new RecipeService(db, new FakeCurrentUser(userId)), agent);
-        return new AutoDietService(plans, recipeGen, db, targets, profiles);
+        return new AutoDietService(plans, recipeGen, targets, profiles);
     }
 
     private static void SeedDiet(NutriForgeDbContext db, string slug) =>
@@ -67,7 +68,7 @@ public sealed class AutoDietTests
         MaxPrepMinutes: null, MealsPerDay: 3, HorizonDays: 3, Eaters: null, BlockSize: null, Members: []);
 
     [Fact]
-    public async Task Generates_recipes_to_fill_an_empty_catalog_then_plans()
+    public async Task Writes_fresh_recipes_and_plans_from_them()
     {
         var userId = Guid.NewGuid();
         await using var db = TestDb.New(userId);
@@ -76,9 +77,10 @@ public sealed class AutoDietTests
 
         var result = await BuildAuto(db, userId, new CountingGenAgent()).CreateAsync(userId, Req("high-protein"));
 
-        Assert.True(result.RecipesGenerated > 0, "an empty catalog must trigger recipe generation");
-        Assert.NotEmpty(result.Plan.Slots); // the planner produced meals from the generated recipes
-        Assert.True(await db.Recipes.IgnoreQueryFilters().CountAsync(CancellationToken.None) >= result.RecipesGenerated);
+        Assert.True(result.RecipesGenerated > 0, "the agent should write recipes for the plan");
+        Assert.NotEmpty(result.Plan.Slots);
+        // Every meal in the plan is one of the freshly written recipes.
+        Assert.All(result.Plan.Slots, s => Assert.StartsWith("Fresh ", s.RecipeName));
     }
 
     [Fact]
@@ -97,14 +99,14 @@ public sealed class AutoDietTests
     }
 
     [Fact]
-    public async Task Does_not_generate_when_the_pool_is_already_deep()
+    public async Task Builds_from_fresh_recipes_not_the_existing_catalog()
     {
         var userId = Guid.NewGuid();
         await using var db = TestDb.New(userId);
         SeedDiet(db, "high-protein");
         await db.SaveChangesAsync(CancellationToken.None);
 
-        // Pre-seed 12 qualifying recipes so the pool already exceeds the per-meal target.
+        // Pre-seed a deep, qualifying catalog. The auto flow must IGNORE these and use only fresh recipes.
         var recipes = new RecipeService(db, new FakeCurrentUser(userId));
         for (var i = 0; i < 12; i++)
         {
@@ -113,16 +115,38 @@ public sealed class AutoDietTests
                 [new RecipeIngredientInput(200, "g", "chicken breast"), new RecipeIngredientInput(150, "g", "white rice")]),
                 ownerUserId: userId);
         }
-        var before = await db.Recipes.IgnoreQueryFilters().CountAsync(CancellationToken.None);
 
         var result = await BuildAuto(db, userId, new CountingGenAgent()).CreateAsync(userId, Req("high-protein"));
 
-        Assert.Equal(0, result.RecipesGenerated);
-        Assert.Equal(before, await db.Recipes.IgnoreQueryFilters().CountAsync(CancellationToken.None));
+        Assert.True(result.RecipesGenerated > 0, "fresh recipes are written even when the catalog is deep");
+        Assert.NotEmpty(result.Plan.Slots);
+        Assert.DoesNotContain(result.Plan.Slots, s => s.RecipeName.StartsWith("Prebuilt", StringComparison.Ordinal));
+        Assert.All(result.Plan.Slots, s => Assert.StartsWith("Fresh ", s.RecipeName));
     }
 
     [Fact]
-    public async Task Without_an_ai_provider_it_plans_without_generating()
+    public async Task Plan_generated_recipes_are_hidden_from_the_recipe_catalog()
+    {
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
+        SeedDiet(db, "high-protein");
+        await db.SaveChangesAsync(CancellationToken.None);
+
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
+        // A recipe the user explicitly added to their catalog (should remain visible).
+        await recipes.CreateAsync(new CreateRecipeRequest(
+            "My own bowl", 1, 10, "Mix.", ["high-protein"],
+            [new RecipeIngredientInput(150, "g", "chicken breast")]), ownerUserId: userId);
+
+        await BuildAuto(db, userId, new CountingGenAgent()).CreateAsync(userId, Req("high-protein"));
+
+        var listed = await recipes.ListAsync(null);
+        Assert.Single(listed); // only the user's own recipe — the plan-generated ones are hidden
+        Assert.Equal("My own bowl", listed[0].Name);
+    }
+
+    [Fact]
+    public async Task Without_an_ai_provider_it_plans_from_the_catalog()
     {
         var userId = Guid.NewGuid();
         await using var db = TestDb.New(userId);

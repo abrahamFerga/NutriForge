@@ -25,8 +25,14 @@ public sealed class DietPlanService(
 {
     internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>Create a plan (PARSE + persist as Generating) and return it; the worker generates it.</summary>
-    public async Task<DietPlanDto> CreateAsync(Guid userId, CreateDietPlanRequest req, CancellationToken ct = default)
+    /// <summary>
+    /// Create a plan (PARSE + persist as Generating) and return it. When <paramref name="onlyRecipeIds"/>
+    /// is non-null the plan is built from EXACTLY those recipes (the auto-diet flow passes the recipes it
+    /// just wrote, so the plan never draws from the user's catalog); null uses the whole catalog.
+    /// </summary>
+    public async Task<DietPlanDto> CreateAsync(
+        Guid userId, CreateDietPlanRequest req,
+        IReadOnlyCollection<Guid>? onlyRecipeIds = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(req);
 
@@ -80,7 +86,7 @@ public sealed class DietPlanService(
 
         // Run the deterministic pipeline now (it's fast) so the 202 poll returns a finished plan.
         // The background worker remains the path for slow, LLM-backed SELECT in future.
-        await FinishGenerationAsync(plan, intent, ct).ConfigureAwait(false);
+        await FinishGenerationAsync(plan, intent, onlyRecipeIds, ct).ConfigureAwait(false);
 
         // When the request carries no explicit members, fall back to the user's SAVED household (#100) so
         // the partner/children they always cook for are attached automatically — no re-adding each plan. A
@@ -94,15 +100,24 @@ public sealed class DietPlanService(
         return ToDto(plan);
     }
 
-    /// <summary>Run FILTER → SELECT → VERIFY → REPAIR over the catalog pool and finish the plan.</summary>
-    private async Task FinishGenerationAsync(MealPlan plan, DietIntent intent, CancellationToken ct)
+    /// <summary>Run FILTER → SELECT → VERIFY → REPAIR over the (optionally restricted) pool and finish the plan.</summary>
+    private async Task FinishGenerationAsync(
+        MealPlan plan, DietIntent intent, IReadOnlyCollection<Guid>? onlyRecipeIds, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew(); // #50 — p95 plan-latency SLO
 
         // Order by Id so the greedy round-robin pool is stable: same inputs ⇒ same plan (deterministic
         // generation, independent of DB heap order). Eaters never enters here.
-        var recipes = await catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
-            .Where(r => r.IsNutritionComputed).OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false);
+        var query = catalog.Recipes.AsNoTracking().Include(r => r.Ingredients)
+            .Where(r => r.IsNutritionComputed);
+        if (onlyRecipeIds is not null)
+        {
+            // Auto-diet: build from EXACTLY the recipes just written for this plan (empty ⇒ empty pool ⇒
+            // an honest "infeasible" rather than silently falling back to the user's catalog).
+            query = query.Where(r => onlyRecipeIds.Contains(r.Id));
+        }
+
+        var recipes = await query.OrderBy(r => r.Id).ToListAsync(ct).ConfigureAwait(false);
         var diet = string.IsNullOrEmpty(intent.DietSlug)
             ? null
             : await catalog.DietTypes.AsNoTracking().FirstOrDefaultAsync(d => d.Slug == intent.DietSlug, ct).ConfigureAwait(false);

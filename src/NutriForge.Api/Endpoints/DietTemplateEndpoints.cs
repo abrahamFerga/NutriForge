@@ -53,7 +53,7 @@ public static class DietTemplateEndpoints
             .WithName("DeleteDietTemplate");
 
         // One-tap regenerate: build the saved request and run the generator (saved household auto-attaches).
-        group.MapPost("/{id:guid}/generate", async (Guid id, ICurrentUser user, DietTemplateService templates, DietPlanService plans, CancellationToken ct) =>
+        group.MapPost("/{id:guid}/generate", async (Guid id, ICurrentUser user, DietTemplateService templates, AutoDietService auto, CancellationToken ct) =>
         {
             var uid = user.CurrentUserId();
             var req = await templates.ToCreateRequestAsync(uid, id, ct);
@@ -62,8 +62,9 @@ public static class DietTemplateEndpoints
                 return Results.NotFound();
             }
 
-            var plan = await plans.CreateAsync(uid, req, ct);
-            return Results.Ok(plan);
+            // Same as "Generate my plan": the agent writes fresh recipes for the plan (catalog untouched).
+            var result = await auto.CreateAsync(uid, req, ct);
+            return Results.Ok(result.Plan);
         }).RequireRateLimiting(RateLimitPolicies.Expensive).WithName("GenerateFromDietTemplate");
 
         return app;

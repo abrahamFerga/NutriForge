@@ -22,7 +22,7 @@ public static class DietPlanEndpoints
         // Async generate — returns 202 with the plan id; the worker fills it in.
         group.MapPost("/", async (CreateDietPlanRequest req, ICurrentUser user, DietPlanService plans, CancellationToken ct) =>
         {
-            var plan = await plans.CreateAsync(user.CurrentUserId(), req, ct);
+            var plan = await plans.CreateAsync(user.CurrentUserId(), req, ct: ct);
             return Results.Accepted($"/api/v1/diet-plans/{plan.Id}", plan);
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)

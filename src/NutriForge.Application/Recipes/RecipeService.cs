@@ -250,7 +250,9 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
 
     public async Task<IReadOnlyList<RecipeSummary>> ListAsync(string? query, CancellationToken ct = default)
     {
-        var q = db.Recipes.AsNoTracking();
+        // Hide per-plan generated recipes (#101) from the catalog browser — they belong to a specific diet
+        // plan, not the user's recipe collection. EF applies C# null-semantics, so null-source recipes stay.
+        var q = db.Recipes.AsNoTracking().Where(r => r.SourceType != RecipeGenerationService.PlanGeneratedSource);
         if (!string.IsNullOrWhiteSpace(query))
         {
             var term = query.Trim().ToLowerInvariant();
