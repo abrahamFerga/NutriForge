@@ -23,6 +23,10 @@ jobs:
 
       - name: Dependency review
         uses: actions/dependency-review-action@v4
+        # Non-blocking until the repo's Dependency graph is enabled
+        # (Settings → Code security & analysis). Once enabled, remove this line so the
+        # check can again fail PRs on vulnerable/denied dependencies.
+        continue-on-error: true
         with:
           # Fail on HIGH and CRITICAL severity vulnerabilities.
           fail-on-severity: high
