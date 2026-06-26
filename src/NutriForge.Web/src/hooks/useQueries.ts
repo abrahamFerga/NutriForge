@@ -5,10 +5,7 @@ import {
 } from "@tanstack/react-query";
 import { diaryApi, profileApi, targetsApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
-import type {
-  CreateDiaryEntryRequest,
-  UpdateProfileRequest,
-} from "@/lib/types";
+import type { UpdateProfileRequest } from "@/lib/types";
 
 export function useProfile() {
   return useQuery({
@@ -46,17 +43,6 @@ export function useSaveProfile() {
       qc.setQueryData(queryKeys.profile, saved);
       // Targets depend on profile; diary embeds targets.
       qc.invalidateQueries({ queryKey: queryKeys.targets });
-      qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
-    },
-  });
-}
-
-export function useAddDiaryEntry() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateDiaryEntryRequest) => diaryApi.create(body),
-    onSuccess: (entry) => {
-      qc.invalidateQueries({ queryKey: queryKeys.diary(entry.date) });
       qc.invalidateQueries({ queryKey: queryKeys.diaryAll });
     },
   });
