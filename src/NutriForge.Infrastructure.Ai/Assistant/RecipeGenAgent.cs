@@ -28,6 +28,12 @@ public sealed class RecipeGenAgent(IAssistantAgentFactory factory) : IRecipeGenA
           every quantity of energy and protein/fat/carbs itself.
         - Prefer COMMON, widely-available whole ingredients and simple pantry staples, and always give a
           concrete quantity + unit for each, so the app can resolve nutrition. Avoid obscure brand items.
+        - ONE ingredient per line. Split compound lines into separate ingredients: "salt and pepper" must
+          become two ingredients, "salt" and "pepper" (each with its own quantity); never put two foods on
+          one line and never use "and"/"&"/"or" to join two foods in a single name.
+        - Use realistic household quantities for the stated number of servings. A normal recipe uses on the
+          order of 1 tbsp of oil per 1-2 servings and a pinch to ~1 tsp of salt — NEVER cups of oil or tens
+          of grams of a seasoning. Keep oil, salt, and spices modest; only the main components are large.
         - Respect the requested diet, and DO NOT use any ingredient in the exclusion list or anything
           derived from it (these are allergies — treat as safety-critical).
         - The recipe MUST suit the requested meal type. A breakfast must be a dish people genuinely eat

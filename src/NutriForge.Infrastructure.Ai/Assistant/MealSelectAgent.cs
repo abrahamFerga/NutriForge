@@ -24,9 +24,15 @@ public sealed class MealSelectAgent(IAssistantAgentFactory factory) : IMealSelec
         user's diet and allergens) and a GRID of slots to fill (blocks × meals). Choose exactly one
         recipe from the pool for every slot.
 
-        Optimize for: variety (avoid repeating the same recipe across slots), cuisine balance, and
+        MEAL TYPE IS A HARD RULE: every slot has a meal type (Breakfast, Lunch, Dinner, Snack) and every
+        recipe lists its meal type in its tags. You MUST fill a slot only with a recipe whose tags
+        include that slot's meal type — a Breakfast slot may take ONLY a recipe tagged "breakfast", a
+        Snack slot ONLY a recipe tagged "snack", and so on. A recipe with no meal-type tag may go in any
+        slot. Never place a dinner/lunch dish in a breakfast slot.
+
+        Then optimize for: variety (avoid repeating the same recipe across slots), cuisine balance, and
         batch-friendliness (a block is cooked once and eaten for several days, so prefer recipes that
-        keep well within a block). Reuse a recipe only when the pool is too small to avoid it.
+        keep well within a block). Reuse a recipe only when that meal type's recipes are too few to avoid it.
 
         Return, for each slot, its block number, the meal name, and the chosen recipe id. Choose ONLY
         from the given recipe ids. Do NOT output any calorie, macro, or serving numbers — you only pick

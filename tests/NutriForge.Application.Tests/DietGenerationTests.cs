@@ -225,6 +225,52 @@ public sealed class DietGenerationTests
         Assert.Equal(sync.DailyAverage.Kcal, viaAsync.DailyAverage.Kcal, precision: 3);
     }
 
+    // ---- Meal-type enforcement (#101 breakfast fix) ----
+
+    private static Recipe[] MealTaggedPool() =>
+    [
+        Rec("Oatmeal", ["breakfast"], ("oats", new Macros(400, 15, 8, 60))),
+        Rec("Veggie omelette", ["breakfast"], ("eggs", new Macros(350, 24, 25, 4))),
+        Rec("Chicken salad", ["lunch"], ("chicken", new Macros(500, 40, 20, 10))),
+        Rec("Steak & greens", ["dinner"], ("beef", new Macros(700, 45, 40, 5))),
+        Rec("Trail mix", ["snack"], ("nuts", new Macros(200, 6, 16, 8))),
+    ];
+
+    [Fact]
+    public void Generate_keeps_each_meal_slot_to_its_meal_type()
+    {
+        // The deterministic selector must never put a dinner recipe in a breakfast slot: each slot only
+        // draws from recipes carrying that slot's meal-type tag. (Round-robin over the flat pool — the
+        // old behaviour — would scatter recipes across the wrong slots and fail this.)
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer());
+        var intent = new DietIntent(2000, null, null, [], null, MealsPerDay: 4, HorizonDays: 3);
+
+        var result = generator.Generate(MealTaggedPool(), intent, 2000);
+
+        Assert.True(result.Feasible, result.Message);
+        Assert.All(result.Slots, s =>
+            Assert.Contains(s.Meal.ToString().ToLowerInvariant(), s.Recipe.Tags, StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GenerateAsync_rejects_a_meal_type_mismatched_agent_pick_and_keeps_slots_on_type()
+    {
+        // The agent deliberately puts the DINNER recipe in every slot (including breakfast/lunch). Those
+        // meal-type-mismatched picks are rejected, the grid is incomplete, and we fall back to the
+        // meal-aware greedy selection — so every slot still holds a recipe of its own meal type.
+        var pool = MealTaggedPool();
+        var dinner = pool.Single(r => r.Tags.Contains("dinner"));
+        var agent = new FakeSelectAgent(configured: true, (p, blocks, meals) => FullSelection(p, blocks, meals, () => dinner));
+        var generator = new DietPlanGenerator(new OrToolsPortionOptimizer(), agent);
+        var intent = new DietIntent(2000, null, null, [], null, MealsPerDay: 4, HorizonDays: 2);
+
+        var result = await generator.GenerateAsync(pool, intent, 2000);
+
+        Assert.True(result.Feasible, result.Message);
+        Assert.All(result.Slots, s =>
+            Assert.Contains(s.Meal.ToString().ToLowerInvariant(), s.Recipe.Tags, StringComparer.OrdinalIgnoreCase));
+    }
+
     private sealed class FakeSelectAgent(
         bool configured,
         Func<IReadOnlyList<Recipe>, int, int, IReadOnlyList<MealSelection>?>? select = null) : IMealSelectAgent
