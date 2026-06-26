@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
-import { ErrorState, LoadingState } from "@/components/StateMessage";
+import { EmptyState, ErrorState, LoadingState } from "@/components/StateMessage";
 import { useDebounced } from "@/hooks/useQueries";
 import { ApiError, isAdmin, recipesApi, setDevRole } from "@/lib/api";
 import { authEnabled } from "@/lib/auth";
@@ -87,26 +87,55 @@ function AdminToggle() {
 }
 
 export function Recipes() {
+  const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [importDraft, setImportDraft] = useState<ImportPreviewDto | null>(null);
+  const [genNote, setGenNote] = useState<string | null>(null);
+
+  // The user would rather not author recipes — let AI stock the catalog (#101).
+  const generate = useMutation({
+    mutationFn: () => recipesApi.generate({ count: 5 }),
+    onSuccess: (created) => {
+      setGenNote(
+        `Added ${created.length} AI recipe${created.length === 1 ? "" : "s"} to your catalog.`,
+      );
+      void qc.invalidateQueries({ queryKey: queryKeys.recipes });
+    },
+  });
+  const noAi = generate.error instanceof ApiError && generate.error.status === 503;
+
+  function runGenerate() {
+    setGenNote(null);
+    generate.mutate();
+  }
+  function startManual() {
+    setShowForm(true);
+    setShowImport(false);
+    setImportDraft(null);
+  }
 
   if (selectedId) {
-    return (
-      <RecipeDetail id={selectedId} onBack={() => setSelectedId(null)} />
-    );
+    return <RecipeDetail id={selectedId} onBack={() => setSelectedId(null)} />;
   }
 
   return (
     <div className="space-y-6">
       <PageHeading
         title="Recipes"
-        subtitle="Browse recipes and their per-serving nutrition"
+        subtitle="Browse your recipes, or let AI write new ones for you"
         icon={ChefHat}
         action={
           <>
             <AdminToggle />
+            <Button
+              variant="ghost"
+              onClick={startManual}
+            >
+              <Plus className="h-4 w-4" />
+              Add manually
+            </Button>
             <Button
               variant="outline"
               onClick={() => {
@@ -118,19 +147,22 @@ export function Recipes() {
               <Youtube className="h-4 w-4" />
               Import
             </Button>
-            <Button
-              onClick={() => {
-                setShowForm((v) => !v);
-                setShowImport(false);
-                setImportDraft(null);
-              }}
-            >
-              <Plus className="h-4 w-4" />
-              New recipe
+            <Button onClick={runGenerate} disabled={generate.isPending}>
+              {generate.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+              Generate with AI
             </Button>
           </>
         }
       />
+
+      {genNote ? <p className="text-sm text-brand-400">{genNote}</p> : null}
+      {noAi ? (
+        <p className="rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+          AI recipe generation needs an AI provider to be configured.
+        </p>
+      ) : generate.isError ? (
+        <ErrorState error={generate.error} />
+      ) : null}
 
       {showImport && !importDraft ? (
         <ImportPanel
@@ -151,7 +183,12 @@ export function Recipes() {
         <NewRecipeForm onCreated={() => setShowForm(false)} />
       ) : null}
 
-      <RecipeList onSelect={setSelectedId} />
+      <RecipeList
+        onSelect={setSelectedId}
+        onGenerate={runGenerate}
+        onAddManually={startManual}
+        generating={generate.isPending}
+      />
     </div>
   );
 }
@@ -183,30 +220,30 @@ function ImportPanel({ onPreview }: { onPreview: (d: ImportPreviewDto) => void }
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-1">
-          <Label htmlFor="imp-url">Recipe URL (web or YouTube)</Label>
+          <Label htmlFor="imp-url">Paste a recipe link (web or YouTube)</Label>
           <Input
             id="imp-url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com/recipe  ·  no API key needed for recipe sites"
+            placeholder="https://example.com/recipe"
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="imp-text">…or paste the recipe text / page HTML</Label>
+          <Label htmlFor="imp-text">…or paste the recipe text</Label>
           <textarea
             id="imp-text"
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={4}
-            placeholder="Paste ingredients + steps, or a recipe page's HTML — handy when a video has no description"
+            placeholder="Paste the ingredients and steps — handy when a video has no description"
             className="flex w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-brand-500 focus-visible:ring-2 focus-visible:ring-brand-500/30 focus-visible:outline-none"
           />
         </div>
 
         {noProvider ? (
           <p className="rounded-lg border border-amber-900/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
-            Recipe import needs an AI provider — set OPENAI_API_KEY (and a
-            YouTube&nbsp;Data&nbsp;API key to auto-read video descriptions).
+            Importing from a link or pasted text needs an AI provider to be configured. Recipe sites
+            with structured data still work without it.
           </p>
         ) : preview.isError ? (
           <ErrorState error={preview.error} />
@@ -221,10 +258,8 @@ function ImportPanel({ onPreview }: { onPreview: (d: ImportPreviewDto) => void }
           Extract recipe
         </Button>
         <p className="text-xs text-slate-500">
-          Recipe sites are read directly from their structured data (no key
-          needed); YouTube/free text uses AI. Either way calories are computed
-          from the catalog. You review &amp;
-          confirm before saving.
+          We read the recipe for you and compute the calories from the catalog. You review and confirm
+          before saving.
         </p>
       </CardContent>
     </Card>
@@ -233,9 +268,20 @@ function ImportPanel({ onPreview }: { onPreview: (d: ImportPreviewDto) => void }
 
 // -------------------- Recipe list + search --------------------
 
-function RecipeList({ onSelect }: { onSelect: (id: string) => void }) {
+function RecipeList({
+  onSelect,
+  onGenerate,
+  onAddManually,
+  generating,
+}: {
+  onSelect: (id: string) => void;
+  onGenerate: () => void;
+  onAddManually: () => void;
+  generating: boolean;
+}) {
   const [term, setTerm] = useState("");
   const debounced = useDebounced(term, 350);
+  const searching = debounced.trim().length > 0;
 
   const recipes = useQuery({
     queryKey: queryKeys.recipeSearch(debounced.trim()),
@@ -260,9 +306,25 @@ function RecipeList({ onSelect }: { onSelect: (id: string) => void }) {
       ) : recipes.isError ? (
         <ErrorState error={recipes.error} />
       ) : !recipes.data || recipes.data.length === 0 ? (
-        <p className="py-10 text-center text-sm text-slate-500">
-          No recipes found. Create one to get started.
-        </p>
+        searching ? (
+          <EmptyState title={`No recipes match “${debounced.trim()}”`}>
+            <p>Try a different search, or generate one with AI.</p>
+          </EmptyState>
+        ) : (
+          <EmptyState title="No recipes yet">
+            <p>Let AI write a few to get you started — no typing required.</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button onClick={onGenerate} disabled={generating}>
+                {generating ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+                Generate with AI
+              </Button>
+              <Button variant="outline" onClick={onAddManually}>
+                <Plus className="h-4 w-4" />
+                Add one myself
+              </Button>
+            </div>
+          </EmptyState>
+        )
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {recipes.data.map((recipe) => (
@@ -538,7 +600,7 @@ function RecipeDetail({ id, onBack }: { id: string; onBack: () => void }) {
                                   {ing.unit ? ` ${ing.unit}` : ""}
                                   {ing.resolved ? null : (
                                     <span className="ml-1.5 text-amber-400">
-                                      · unresolved
+                                      · not matched yet
                                     </span>
                                   )}
                                 </p>
@@ -785,7 +847,7 @@ function NewRecipeForm({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="r-minutes">Total minutes</Label>
+            <Label htmlFor="r-minutes">Time (min)</Label>
             <Input
               id="r-minutes"
               type="number"
@@ -795,7 +857,7 @@ function NewRecipeForm({
             />
           </div>
           <div className="space-y-1 sm:col-span-2">
-            <Label htmlFor="r-tags">Tags (comma-separated)</Label>
+            <Label htmlFor="r-tags">Tags</Label>
             <Input
               id="r-tags"
               value={tags}
