@@ -458,17 +458,21 @@ export const shoppingApi = {
 
 export const dietPlansApi = {
   /** POST returns 202 with the (likely still Generating) plan. */
-  create(body: CreateDietPlanRequest): Promise<DietPlanDto> {
-    return request<DietPlanDto>("/api/v1/diet-plans", { method: "POST", body });
+  create(body: CreateDietPlanRequest, signal?: AbortSignal): Promise<DietPlanDto> {
+    return request<DietPlanDto>("/api/v1/diet-plans", { method: "POST", body, signal });
   },
   /**
    * "Make me a full diet" (#101): generates recipes to fill the pool when it's thin, then plans.
    * Returns the plan plus how many recipes were generated. Throws {@link ApiError} 503 with no AI.
    */
-  auto(body: CreateDietPlanRequest): Promise<{ plan: DietPlanDto; recipesGenerated: number }> {
+  auto(
+    body: CreateDietPlanRequest,
+    signal?: AbortSignal,
+  ): Promise<{ plan: DietPlanDto; recipesGenerated: number }> {
     return request<{ plan: DietPlanDto; recipesGenerated: number }>("/api/v1/diet-plans/auto", {
       method: "POST",
       body,
+      signal,
     });
   },
   get(id: string, signal?: AbortSignal): Promise<DietPlanDto> {

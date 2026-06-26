@@ -65,7 +65,7 @@ Every credible system here (MyFitnessPal, NutriGen, the research frameworks) end
 
 ## Status
 
-**Calorie-tracking MVP is implemented and building green.** The full design chain
+**The full calorie-tracking-through-diet-generation loop is implemented and building green**, including the household, AI-driven diet, diet presets, and UX-overhaul batch shipped 2026-06-26 ([PR #104](https://github.com/abrahamFerga/NutriForge/pull/104)). The full design chain
 ([`SPEC.md`](SPEC.md) → [`PLAN.md`](PLAN.md) → [`ARCH.md`](ARCH.md) → [`DECISIONS.md`](DECISIONS.md))
 is in place, the 6-epic backlog lives on GitHub
 ([issues](https://github.com/abrahamFerga/NutriForge/issues) · milestones in build order),
@@ -84,7 +84,9 @@ and **Epics 1–3 (Foundations, Food & Nutrition Core, Calorie Tracking)** are b
   `get_daily_targets`, `get_today_summary`, `get_profile`) routed through the same Application
   services as the REST API — so the LLM proposes and narrates, but **deterministic code owns every
   number** (ADR-0004). Provider-swappable (OpenAI primary), per-user persisted sessions, served at
-  `POST /api/v1/assistant/chat`.
+  `POST /api/v1/assistant/chat`. The `RecipeGenAgent` generates recipe names, ingredients, and steps
+  from a plan brief; `RecipeGenerationService` resolves every ingredient against the deterministic
+  `NutritionReference` table so the LLM never touches a calorie number.
 - **Tests** (`tests/`): the TDEE golden test, the calorie safety-floor guard, diary-snapshot
   immutability, and per-user isolation — all green.
 
@@ -128,7 +130,7 @@ dotnet user-secrets --project src/NutriForge.AppHost set Parameters:openai-api-k
 #   → open the Aspire dashboard URL it prints; the SPA + API resources are listed there.
 #   (Integration tests are exempt from the key requirement — they assert the assistant's 503 path.)
 
-# tests: 12/12 green. Integration tests boot the real AppHost (Postgres + Redis) via Docker.
+# tests: Application 154 + Domain 41 green. Integration tests boot the real AppHost (Postgres + Redis) via Docker.
 dotnet test NutriForge.slnx
 ```
 
@@ -143,18 +145,22 @@ In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required): 
 `X-Debug-Subject` to act as a user, `X-Debug-Role` to pick `user`/`admin`; **no subject header ⇒
 anonymous**.
 
-**Production auth (Entra External ID).** Outside Development the dev scheme is disabled — the API
-**fails to start** unless a real OIDC authority is configured, so a deployment can never be bypassed
-with headers. To go live:
-1. Create an **Entra External ID** (CIAM) tenant. Register an **API** app (Expose an API → add a
-   scope) and a **SPA** app (SPA platform, redirect URI = your SPA origin; Auth-Code + PKCE).
-2. Define an **`admin`** app role on the API app and assign it to admin users (other users default
-   to `user`).
-3. Configure the API: `Authentication__Authority` = your CIAM authority URL,
-   `Authentication__Audience` = the API app's client-id / Application-ID-URI. (`Authentication__RoleClaim`
-   defaults to `roles`; JWT subject/role mapping is already wired.)
-4. Point the SPA at the same tenant/client via `VITE_AUTH_AUTHORITY` / `VITE_AUTH_CLIENT_ID` /
-   `VITE_AUTH_SCOPE`. The SPA MSAL (Auth-Code + PKCE) login flow is the remaining piece of #56.
+**Production auth (Entra External ID, #56).** Outside Development the dev scheme is disabled — the
+API **fails to start** unless a real OIDC authority is configured, so a deployment can never be
+bypassed with headers. Both ends are wired: the API validates Entra JWTs (`sub`→user, `roles`→admin;
+see `AuthSetup.cs`) and the SPA runs the MSAL Auth-Code + PKCE flow whenever the three `VITE_AUTH_*`
+values are set (`src/NutriForge.Web/src/lib/auth.ts`). To go live:
+1. Create an **Entra External ID** (CIAM) tenant + a sign-up/sign-in user flow (one-time, manual —
+   Terraform can't provision the tenant). See [`infra/entra/README.md`](infra/entra/README.md).
+2. Run the **`infra/entra`** Terraform module against that tenant — it creates the **API** app
+   (exposes `access_as_user` + the `admin` app role) and the **SPA** app (public client, redirect
+   URIs, pre-authorized on the API). It also assigns `admin` to the principals you list.
+3. Feed its outputs in: `auth_authority` / `auth_audience` → `infra/environments/<env>.tfvars` (the
+   subscription infra injects `Authentication__Authority` / `Authentication__Audience` into the API
+   Container App), and `vite_auth_env` → the SPA build (`VITE_AUTH_*`).
+
+Until the tenant exists the OIDC path can't be exercised end-to-end; dev-auth remains the local
+fallback. (`Authentication__RoleClaim` defaults to `roles`.)
 
 **Epic 4 (low-friction logging) is built**: barcode lookup with Open Food Facts
 fetch-on-miss (`GET /api/v1/foods/barcode/{gtin}`) and natural-language entry
@@ -166,5 +172,21 @@ and the consolidated, aisle-grouped, pantry-aware shopping list (`/api/v1/shoppi
 **Epic 6** — the flagship **diet generation** (`/api/v1/diet-plans`): desire/intent → PARSE (LLM,
 optional) → FILTER (deterministic, allergen-safe) → SELECT → VERIFY → **OR-Tools LP REPAIR** →
 EXPLAIN, then the closed loop (accept → shopping list → adherence). The LLM proposes intent/taste/
-explanation; deterministic code owns every number and every allergen gate. Remaining: the
-cross-cutting hardening/growth epics (8–12).
+explanation; deterministic code owns every number and every allergen gate.
+
+### Latest product additions (2026-06-26, [PR #104](https://github.com/abrahamFerga/NutriForge/pull/104))
+
+- **Saved household (#100)**: people the user regularly cooks for are saved once as `HouseholdMember`
+  records and auto-attached to every new plan — no re-adding a partner each time. `GET/PUT /api/v1/household`.
+- **Diet presets (#102)**: any plan's parameters can be saved as a `DietTemplate` and re-run in one
+  tap; the saved household auto-attaches. `GET/POST/DELETE /api/v1/diet-templates`, `POST /{id}/generate`.
+- **AI full-diet with fresh recipes (#101)**: `POST /api/v1/diet-plans/auto` generates a
+  self-contained recipe set per plan (2–4 recipes per meal type, tagged `plan-generated`). Plan
+  recipes are excluded from the recipe browser, keeping the catalog clean. `DELETE
+  /api/v1/recipes/ai-generated` clears catalog AI recipes on demand. Numbers are deterministic
+  throughout — the LLM writes names and steps only (ADR-0004, ADR-0016).
+- **Modern UX overhaul (#103)**: one obvious primary action per screen, deep-slate + emerald/teal
+  design system, route-entrance animation, gradient nav pill, per-screen `PageHeading`. Light mode
+  fixed via CSS variable slate-scale inversion — one block in `index.css` covers all ~400 utility
+  references. Plain language throughout; jargon ("block-size", "macro-strategy", "GTIN", "formula")
+  removed from all user-facing text.

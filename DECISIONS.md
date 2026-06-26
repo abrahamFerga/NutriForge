@@ -589,3 +589,56 @@ Transcript enrichment is:
   production deployments (POT); waste of DB writes.
 - **Storing raw VTT format** — rejected: VTT timestamps add noise to NL parsing; cleaned plain text
   is stored instead.
+
+---
+
+## ADR-0016: Plan-generated recipes are isolated from the user's recipe catalog
+
+- **Status**: accepted
+- **Date**: 2026-06-26
+- **Deciders**: Engineering
+- **Affects**: `Application.DietGen.AutoDietService`, `Application.Recipes.RecipeService`,
+  `Application.Recipes.RecipeGenerationService`
+
+### Context
+
+`AutoDietService` generates recipes to satisfy a diet plan. The original implementation used a
+"generate-shortfall" model: if the user's catalog had fewer than N matching recipes, the agent
+filled the gap — writing new recipes *into the catalog* and then drawing from the full catalog for
+the plan. This created two problems:
+
+1. **Catalog pollution**: every "Generate my plan" tap silently accumulated AI recipes in the
+   recipe browser, eventually drowning the user's own recipes.
+2. **Plan/catalog coupling**: a plan's ingredient list was tethered to whatever the catalog held at
+   generation time; a different user state would produce a different plan from the same request.
+
+### Decision
+
+Auto-diet generation **always writes a fresh, self-contained recipe set for each plan**:
+
+1. `AutoDietService` calls `RecipeGenerationService.GenerateAsync(…, sourceType: "plan-generated")`
+   to produce 2–4 recipes per meal type, scaled to the horizon (capped at 16 total).
+2. The freshly-written recipe IDs are passed as an `onlyRecipeIds` allowlist to
+   `DietPlanService.CreateAsync`, so the plan selects exclusively from those IDs.
+3. `RecipeService.ListAsync` filters out `SourceType == "plan-generated"` rows — plan-generated
+   recipes never appear in the user's recipe browser.
+4. The existing `"ai-generated"` source type (from `POST /api/v1/recipes/generate`) remains visible
+   in the catalog — that is the user's intentional recipe library. `DELETE
+   /api/v1/recipes/ai-generated` bulk-removes catalog AI recipes on demand.
+
+### Consequences
+
+- **Positive**: the recipe catalog stays clean regardless of how many plans the user generates;
+  each plan is fully self-contained and reproducible; the diet filter on generated recipes is always
+  in sync with the plan's `dietSlug`.
+- **Negative**: plan-generated recipes are not reusable across plans — they are regenerated each
+  run. A user who wants to reuse a plan's recipe must save it manually (future work).
+- **Neutral**: plan-generated recipe rows still exist in the database; they are filtered at the
+  service layer. A future scheduled job could prune old ones.
+
+### Alternatives considered
+
+- **Generate-shortfall model (original)** — Rejected: pollutes the catalog; makes plans
+  non-self-contained and non-reproducible.
+- **Separate table for plan-generated recipes** — Viable but over-engineered; the `SourceType`
+  discriminator on the shared `Recipes` table achieves the same isolation without a schema change.

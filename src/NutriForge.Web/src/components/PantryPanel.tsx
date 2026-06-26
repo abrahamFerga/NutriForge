@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { ErrorState, LoadingState } from "@/components/StateMessage";
 import { pantryApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
-import { round } from "@/lib/utils";
+import { cn, round } from "@/lib/utils";
 
 /**
  * Quick add/list pantry widget. Pantry items reduce the quantities the shopping
@@ -20,6 +20,8 @@ export function PantryPanel() {
   const [name, setName] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unit, setUnit] = useState("");
+  // Collapsed by default — the pantry is optional and shouldn't crowd the plan form.
+  const [open, setOpen] = useState(false);
 
   const pantry = useQuery({
     queryKey: queryKeys.pantry,
@@ -51,10 +53,29 @@ export function PantryPanel() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Pantry</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 px-5 py-4 text-left"
+      >
+        <span>
+          <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
+            Pantry
+          </span>
+          <span className="ml-2 text-xs font-normal text-slate-500 normal-case">
+            what you already have
+          </span>
+        </span>
+        <ChevronDown
+          className={cn(
+            "h-4 w-4 shrink-0 text-slate-400 transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+      <CardContent className="space-y-4 pt-0">
         <div className="space-y-2">
           <div className="flex items-end gap-2">
             <div className="flex-1 space-y-1">
@@ -139,6 +160,7 @@ export function PantryPanel() {
           </ul>
         )}
       </CardContent>
+      ) : null}
     </Card>
   );
 }

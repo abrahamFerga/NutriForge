@@ -9,7 +9,9 @@ artifacts/
 TestResults/
 *.trx
 *.coverage
+coverage-merged.xml
 coverage/
+StrykerOutput/
 
 # ---- Aspire / local secrets ----
 **/appsettings.*.local.json

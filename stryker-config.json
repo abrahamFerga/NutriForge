@@ -1,6 +1,5 @@
 {
   "stryker-config": {
-    "solution": "NutriForge.sln",
     "project": "NutriForge.Domain.csproj",
     "test-projects": [
       "tests/NutriForge.Domain.Tests/NutriForge.Domain.Tests.csproj"
@@ -11,8 +10,7 @@
       "low": 60,
       "break": 50
     },
-    "reporters": ["html", "json", "cleartext", "github"],
-    "output-path": "mutation-report",
+    "reporters": ["html", "json", "cleartext"],
     "since": {
       "enabled": false
     }
