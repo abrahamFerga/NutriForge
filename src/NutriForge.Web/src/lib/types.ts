@@ -509,6 +509,22 @@ export interface DietPlanDto {
 
 export type DietSlug = "vegan" | "vegetarian" | "high-protein";
 
+/** A saved person the user regularly cooks for (#100), reused across every plan. */
+export interface HouseholdMember {
+  id: string;
+  name: string;
+  relationship: string | null;
+  /** Their daily kcal target; null means "same as me". */
+  targetKcal: number | null;
+}
+
+/** Create/update a saved household member. Omit targetKcal for "same as me". */
+export interface UpsertHouseholdMemberRequest {
+  name: string;
+  relationship?: string | null;
+  targetKcal?: number | null;
+}
+
 /** One additional person (the owner is added automatically). Omit targetKcal for "same as me". */
 export interface PlanMemberInput {
   name: string;

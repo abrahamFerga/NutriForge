@@ -20,6 +20,8 @@ import type {
   ConsentType,
   FoodDetail,
   FoodSummary,
+  HouseholdMember,
+  UpsertHouseholdMemberRequest,
   HydrationDay,
   ImportPreviewDto,
   ImportRecipeRequest,
@@ -486,6 +488,28 @@ export const dietPlansApi = {
       );
     }
     return response.blob();
+  },
+};
+
+// ---- Saved household (#100) ----
+
+export const householdApi = {
+  list(): Promise<HouseholdMember[]> {
+    return request<HouseholdMember[]>("/api/v1/household");
+  },
+  add(body: UpsertHouseholdMemberRequest): Promise<HouseholdMember> {
+    return request<HouseholdMember>("/api/v1/household", { method: "POST", body });
+  },
+  update(id: string, body: UpsertHouseholdMemberRequest): Promise<HouseholdMember> {
+    return request<HouseholdMember>(`/api/v1/household/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body,
+    });
+  },
+  remove(id: string): Promise<void> {
+    return request<void>(`/api/v1/household/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
   },
 };
 

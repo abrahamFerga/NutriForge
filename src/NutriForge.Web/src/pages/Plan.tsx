@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bookmark,
   Check,
   ChefHat,
   CookingPot,
@@ -26,7 +27,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { ErrorState } from "@/components/StateMessage";
 import { ShoppingList } from "@/components/ShoppingList";
 import { PantryPanel } from "@/components/PantryPanel";
-import { dietPlansApi } from "@/lib/api";
+import { dietPlansApi, householdApi } from "@/lib/api";
 import { queryKeys } from "@/lib/queryKeys";
 import type {
   AdherencePoint,
@@ -36,6 +37,7 @@ import type {
   DietPlanDto,
   DietPlanSlot,
   DietSlug,
+  HouseholdMember,
   ShoppingListDto,
 } from "@/lib/types";
 import { round } from "@/lib/utils";
@@ -84,9 +86,28 @@ export function Plan() {
 // -------------------- Generation form --------------------
 
 /** A row in the "Cooking for" editor — an additional person besides the owner ("You"). */
-type MemberRow = { name: string; mode: "same" | "own"; kcal: string };
+type MemberRow = {
+  /** Set when this row mirrors a saved household member (#100). */
+  id?: string;
+  name: string;
+  mode: "same" | "own";
+  kcal: string;
+  /** Carried through from a saved member so a save doesn't wipe it (the form doesn't edit it). */
+  relationship?: string | null;
+};
+
+function memberToRow(m: HouseholdMember): MemberRow {
+  return {
+    id: m.id,
+    name: m.name,
+    mode: m.targetKcal != null ? "own" : "same",
+    kcal: m.targetKcal != null ? String(m.targetKcal) : "",
+    relationship: m.relationship,
+  };
+}
 
 function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
+  const queryClient = useQueryClient();
   const [dietSlug, setDietSlug] = useState<DietSlug | "">("");
   const [kcalTarget, setKcalTarget] = useState("");
   const [maxPrep, setMaxPrep] = useState("");
@@ -95,20 +116,59 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [desire, setDesire] = useState("");
 
+  // Pre-fill "Cooking for" from the saved household so the partner/children the user always cooks for
+  // are there without re-adding them (#100). Seed once, after the rows are still untouched-empty.
+  const household = useQuery({ queryKey: queryKeys.household, queryFn: householdApi.list });
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && household.data && household.data.length > 0) {
+      seeded.current = true;
+      setMembers(household.data.map(memberToRow));
+    }
+  }, [household.data]);
+
   function updateMember(i: number, patch: Partial<MemberRow>) {
     setMembers((prev) => prev.map((m, idx) => (idx === i ? { ...m, ...patch } : m)));
   }
 
+  // Persist the current "Cooking for" rows as the user's saved household: add new ones, update changed
+  // ones, and delete any saved member they removed from the form.
+  const saveHousehold = useMutation({
+    mutationFn: async () => {
+      const saved = household.data ?? [];
+      const named = members.filter((m) => m.name.trim().length > 0);
+      const keptIds = new Set(named.map((m) => m.id).filter(Boolean));
+
+      await Promise.all(
+        saved
+          .filter((s) => !keptIds.has(s.id))
+          .map((s) => householdApi.remove(s.id)),
+      );
+      await Promise.all(
+        named.map((m) => {
+          const body = {
+            name: m.name.trim(),
+            relationship: m.relationship ?? null,
+            targetKcal: m.mode === "own" ? Number(m.kcal) || null : null,
+          };
+          return m.id ? householdApi.update(m.id, body) : householdApi.add(body);
+        }),
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.household }),
+  });
+
   const create = useMutation({
     mutationFn: () => {
       const body: CreateDietPlanRequest = { horizonDays: Number(days) || 7 };
-      const memberInputs = members
+      // Always send the explicit set the form shows (even empty = just me). The pre-fill already
+      // reflects the saved household, so this respects "remove a row to cook for just yourself".
+      body.members = members
         .filter((m) => m.name.trim().length > 0)
         .map((m) => ({
           name: m.name.trim(),
           targetKcal: m.mode === "own" ? Number(m.kcal) || undefined : undefined,
         }));
-      if (memberInputs.length > 0) body.members = memberInputs;
       if (dietSlug) body.dietSlug = dietSlug;
       if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
       if (maxPrep.trim()) body.maxPrepMinutes = Number(maxPrep);
@@ -244,16 +304,37 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
             </div>
           ))}
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setMembers((prev) => [...prev, { name: "", mode: "same", kcal: "" }])}
-          >
-            <Plus className="h-4 w-4" />
-            Add person
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMembers((prev) => [...prev, { name: "", mode: "same", kcal: "" }])}
+            >
+              <Plus className="h-4 w-4" />
+              Add person
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => saveHousehold.mutate()}
+              disabled={saveHousehold.isPending}
+              title="Save these people so they're added to every plan automatically"
+            >
+              {saveHousehold.isPending ? (
+                <Spinner />
+              ) : saveHousehold.isSuccess ? (
+                <Check className="h-4 w-4 text-brand-400" />
+              ) : (
+                <Bookmark className="h-4 w-4" />
+              )}
+              {saveHousehold.isSuccess ? "Saved to household" : "Save as my household"}
+            </Button>
+          </div>
           <p className="text-xs text-slate-500">
             Everyone eats the same meals; each person&apos;s portion scales to their target.
+            {household.data && household.data.length > 0
+              ? " Your saved household is pre-filled here — edit freely, then re-save."
+              : " Save your household once and we'll add them to every plan automatically."}
           </p>
         </div>
 

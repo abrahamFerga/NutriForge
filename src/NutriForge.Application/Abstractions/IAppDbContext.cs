@@ -23,6 +23,7 @@ public interface IAppDbContext
     DbSet<ConsentRecord> ConsentRecords { get; }
     DbSet<FavoriteFood> FavoriteFoods { get; }
     DbSet<MealTemplate> MealTemplates { get; }
+    DbSet<HouseholdMember> HouseholdMembers { get; }
     DbSet<AssistantSession> AssistantSessions { get; }
     DbSet<PantryItem> PantryItems { get; }
     DbSet<ShoppingList> ShoppingLists { get; }

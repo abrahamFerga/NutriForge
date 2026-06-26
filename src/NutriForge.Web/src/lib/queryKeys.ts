@@ -10,6 +10,7 @@ export const queryKeys = {
   recipeSearch: (q: string) => ["recipes", "search", q] as const,
   recipe: (id: string) => ["recipes", id] as const,
   pantry: ["pantry"] as const,
+  household: ["household"] as const,
   dietPlan: (id: string) => ["diet-plans", id] as const,
   dietPlanAdherence: (id: string) => ["diet-plans", id, "adherence"] as const,
 };

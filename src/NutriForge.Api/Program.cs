@@ -102,6 +102,7 @@ app.MapAssistantEndpoints();
 app.MapRecipeEndpoints();
 app.MapPlanningEndpoints();
 app.MapDietPlanEndpoints();
+app.MapHouseholdEndpoints();
 app.MapNotificationEndpoints();
 app.MapWhatsAppInboundEndpoints();
 

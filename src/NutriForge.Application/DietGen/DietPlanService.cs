@@ -82,7 +82,11 @@ public sealed class DietPlanService(
         // The background worker remains the path for slow, LLM-backed SELECT in future.
         await FinishGenerationAsync(plan, intent, ct).ConfigureAwait(false);
 
-        AttachMembers(plan, req.Members);
+        // When the request carries no explicit members, fall back to the user's SAVED household (#100) so
+        // the partner/children they always cook for are attached automatically — no re-adding each plan. A
+        // non-null Members (even empty) is an explicit override and wins.
+        var members = req.Members ?? await LoadSavedHouseholdAsync(userId, ct).ConfigureAwait(false);
+        AttachMembers(plan, members);
 
         db.MealPlans.Add(plan);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -192,6 +196,15 @@ public sealed class DietPlanService(
     /// member is present they are the sole quantity authority and <see cref="MealPlan.Eaters"/> is
     /// re-derived to the headcount (labels only); with no members the plan keeps its Eaters multiplier.
     /// </summary>
+    /// <summary>Load the user's saved household as plan-member inputs, or null when they've saved nobody.</summary>
+    private async Task<IReadOnlyList<PlanMemberInput>?> LoadSavedHouseholdAsync(Guid userId, CancellationToken ct)
+    {
+        var saved = await db.HouseholdMembers.AsNoTracking()
+            .Where(m => m.UserId == userId)
+            .ToListAsync(ct).ConfigureAwait(false);
+        return saved.Count == 0 ? null : HouseholdService.ToPlanMemberInputs(saved);
+    }
+
     private static void AttachMembers(MealPlan plan, IReadOnlyList<PlanMemberInput>? members)
     {
         if (members is not { Count: > 0 })

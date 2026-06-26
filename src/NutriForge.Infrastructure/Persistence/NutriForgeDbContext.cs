@@ -48,6 +48,7 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
     public DbSet<Domain.Consent.ConsentRecord> ConsentRecords => Set<Domain.Consent.ConsentRecord>();
     public DbSet<FavoriteFood> FavoriteFoods => Set<FavoriteFood>();
     public DbSet<MealTemplate> MealTemplates => Set<MealTemplate>();
+    public DbSet<Domain.Users.HouseholdMember> HouseholdMembers => Set<Domain.Users.HouseholdMember>();
     public DbSet<AssistantSession> AssistantSessions => Set<AssistantSession>();
     public DbSet<PantryItem> PantryItems => Set<PantryItem>();
     public DbSet<ShoppingList> ShoppingLists => Set<ShoppingList>();
@@ -261,6 +262,17 @@ public sealed class NutriForgeDbContext(DbContextOptions<NutriForgeDbContext> op
         {
             e.ToTable("meal_template_items", "app");
             e.HasKey(i => i.Id);
+        });
+
+        // Saved household (#100): the people a user regularly cooks for, reused across every diet plan.
+        b.Entity<Domain.Users.HouseholdMember>(e =>
+        {
+            e.ToTable("household_members", "app");
+            e.HasKey(m => m.Id);
+            e.Property(m => m.Name).HasMaxLength(120).IsRequired();
+            e.Property(m => m.Relationship).HasMaxLength(60);
+            e.HasIndex(m => m.UserId);
+            e.HasQueryFilter(m => m.UserId == CurrentUserId);
         });
 
         b.Entity<AssistantSession>(e =>
