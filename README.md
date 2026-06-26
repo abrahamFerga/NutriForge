@@ -145,18 +145,22 @@ In dev the API uses a local **dev-auth** scheme (no live OIDC tenant required): 
 `X-Debug-Subject` to act as a user, `X-Debug-Role` to pick `user`/`admin`; **no subject header ⇒
 anonymous**.
 
-**Production auth (Entra External ID).** Outside Development the dev scheme is disabled — the API
-**fails to start** unless a real OIDC authority is configured, so a deployment can never be bypassed
-with headers. To go live:
-1. Create an **Entra External ID** (CIAM) tenant. Register an **API** app (Expose an API → add a
-   scope) and a **SPA** app (SPA platform, redirect URI = your SPA origin; Auth-Code + PKCE).
-2. Define an **`admin`** app role on the API app and assign it to admin users (other users default
-   to `user`).
-3. Configure the API: `Authentication__Authority` = your CIAM authority URL,
-   `Authentication__Audience` = the API app's client-id / Application-ID-URI. (`Authentication__RoleClaim`
-   defaults to `roles`; JWT subject/role mapping is already wired.)
-4. Point the SPA at the same tenant/client via `VITE_AUTH_AUTHORITY` / `VITE_AUTH_CLIENT_ID` /
-   `VITE_AUTH_SCOPE`. The SPA MSAL (Auth-Code + PKCE) login flow is the remaining piece of #56.
+**Production auth (Entra External ID, #56).** Outside Development the dev scheme is disabled — the
+API **fails to start** unless a real OIDC authority is configured, so a deployment can never be
+bypassed with headers. Both ends are wired: the API validates Entra JWTs (`sub`→user, `roles`→admin;
+see `AuthSetup.cs`) and the SPA runs the MSAL Auth-Code + PKCE flow whenever the three `VITE_AUTH_*`
+values are set (`src/NutriForge.Web/src/lib/auth.ts`). To go live:
+1. Create an **Entra External ID** (CIAM) tenant + a sign-up/sign-in user flow (one-time, manual —
+   Terraform can't provision the tenant). See [`infra/entra/README.md`](infra/entra/README.md).
+2. Run the **`infra/entra`** Terraform module against that tenant — it creates the **API** app
+   (exposes `access_as_user` + the `admin` app role) and the **SPA** app (public client, redirect
+   URIs, pre-authorized on the API). It also assigns `admin` to the principals you list.
+3. Feed its outputs in: `auth_authority` / `auth_audience` → `infra/environments/<env>.tfvars` (the
+   subscription infra injects `Authentication__Authority` / `Authentication__Audience` into the API
+   Container App), and `vite_auth_env` → the SPA build (`VITE_AUTH_*`).
+
+Until the tenant exists the OIDC path can't be exercised end-to-end; dev-auth remains the local
+fallback. (`Authentication__RoleClaim` defaults to `roles`.)
 
 **Epic 4 (low-friction logging) is built**: barcode lookup with Open Food Facts
 fetch-on-miss (`GET /api/v1/foods/barcode/{gtin}`) and natural-language entry

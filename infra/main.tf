@@ -246,6 +246,16 @@ locals {
       { name = "ConnectionStrings__auditdb", value = "Host=${local.pg_host};Database=auditdb;Username=${azurerm_user_assigned_identity.app.client_id};SSL Mode=Require;Trust Server Certificate=true" },
     ] : []
   )
+
+  # Entra External ID config — API only (the import job has no HTTP surface to authenticate).
+  # Maps to Authentication:Authority / Authentication:Audience read by AuthSetup.cs. Provided by the
+  # infra/entra module's outputs via the auth_* tfvars; omitted when empty so dev/test can run dev-auth.
+  auth_env = concat(
+    var.auth_authority == "" ? [] : [{ name = "Authentication__Authority", value = var.auth_authority }],
+    var.auth_audience == "" ? [] : [{ name = "Authentication__Audience", value = var.auth_audience }],
+  )
+
+  api_env = concat(local.common_env, local.auth_env)
 }
 
 # --- Container App: API (the deployable; external ingress) ------------------ #
@@ -294,7 +304,7 @@ resource "azurerm_container_app" "api" {
       memory = var.container_memory
 
       dynamic "env" {
-        for_each = local.common_env
+        for_each = local.api_env
         content {
           name  = env.value.name
           value = env.value.value

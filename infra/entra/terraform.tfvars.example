@@ -1,0 +1,25 @@
+###############################################################################
+# infra/entra/terraform.tfvars.example
+#
+# Copy to terraform.tfvars and fill in for your CIAM tenant. No secrets here.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   terraform init -backend=false
+#   terraform apply
+###############################################################################
+
+# The Entra External ID (CIAM) tenant the registrations live in.
+tenant_id        = "<CIAM_TENANT_GUID>"
+tenant_subdomain = "<CIAM_SUBDOMAIN>" # e.g. "nutriforge" for nutriforge.ciamlogin.com
+
+app_name = "nutriforge"
+
+# Every origin the SPA is served from (MSAL redirects to window.location.origin).
+spa_redirect_uris = [
+  "https://<your-deployed-spa-origin>",
+  "http://localhost:5173", # local Vite dev (optional)
+]
+
+# Optional: grant the API `admin` app role to these users/groups now. Prefer a
+# group object ID. Leave empty to assign in the portal later.
+# admin_principal_object_ids = ["<ADMIN_GROUP_OBJECT_ID>"]

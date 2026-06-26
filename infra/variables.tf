@@ -154,6 +154,24 @@ variable "log_retention_days" {
   default     = 30
 }
 
+# --- Authentication: Entra External ID (#56) -------------------------------- #
+# These come from the `infra/entra` module's outputs (auth_authority / auth_audience).
+# When both are set they are injected into the API container as Authentication__Authority
+# / Authentication__Audience, so the API validates real Entra tokens. Left empty, the API
+# starts without an authority — which it refuses outside Development (fail-closed), so set
+# them for any deployed environment.
+variable "auth_authority" {
+  description = "OIDC authority URL (Entra External ID). From the infra/entra `auth_authority` output."
+  type        = string
+  default     = ""
+}
+
+variable "auth_audience" {
+  description = "Expected token audience — the API app's client ID. From the infra/entra `auth_audience` output."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Extra tags merged onto the standard tag set."
   type        = map(string)
