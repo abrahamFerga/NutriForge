@@ -1,0 +1,46 @@
+### WhatsApp inbound webhook (#97) — Twilio's two-way logging callback. Set @host from the Aspire
+### dashboard's "api" endpoint.
+###
+### This endpoint is ANONYMOUS: it is authenticated by Twilio's `X-Twilio-Signature` HMAC, not by the
+### dev-auth headers. The signature is Base64(HMAC-SHA1(authToken, signedUrl + each POST field as
+### key+value, ordinal-sorted by key)). A request with a missing/invalid signature is rejected 403.
+###
+### To make the precomputed signature below valid, run the API with these two settings (user-secrets
+### on the API project, or env on the AppHost) so the validator uses a KNOWN token + a FIXED public URL
+### (the override is what lets a precomputed signature survive Aspire's dynamic port):
+###   dotnet user-secrets set "Channels:WhatsApp:Twilio:AuthToken" "devtoken"
+###   dotnet user-secrets set "Channels:WhatsApp:Twilio:InboundWebhookUrl" "https://nutriforge.local/api/v1/channels/whatsapp/inbound"
+###
+### NOTE on form encoding: Twilio signs the DECODED values, so the body must encode `+` as %2B and
+### spaces as `+` (the signature below was computed over From="whatsapp:+15551234567",
+### Body="2 eggs and toast", MessageSid="SM11112222333344445555666677778888").
+
+@host = https://localhost:7443
+
+### 1) Validly-signed inbound from an UNKNOWN sender → 200 with empty <Response/> (no reply, no oracle).
+### (Same signature as below; an unknown number simply isn't linked to any user.)
+POST {{host}}/api/v1/channels/whatsapp/inbound
+X-Twilio-Signature: +wo4LXWv4tE6gWLSKFFIDutF9Bs=
+Content-Type: application/x-www-form-urlencoded
+
+Body=2+eggs+and+toast&From=whatsapp:%2B15551234567&MessageSid=SM11112222333344445555666677778888
+
+### 2) MISSING signature → 403 (the forged-request case this hardening closes).
+POST {{host}}/api/v1/channels/whatsapp/inbound
+Content-Type: application/x-www-form-urlencoded
+
+Body=2+eggs+and+toast&From=whatsapp:%2B15551234567&MessageSid=SM11112222333344445555666677778888
+
+### 3) TAMPERED body with the original signature → 403 (the HMAC binds every field).
+POST {{host}}/api/v1/channels/whatsapp/inbound
+X-Twilio-Signature: +wo4LXWv4tE6gWLSKFFIDutF9Bs=
+Content-Type: application/x-www-form-urlencoded
+
+Body=1+cake&From=whatsapp:%2B15551234567&MessageSid=SM11112222333344445555666677778888
+
+### To exercise the KNOWN-sender path (a real reply): first link your number to a user, then send a
+### message signed for THAT number (recompute the signature for the new From value).
+###   1. PUT  {{host}}/api/v1/notifications/subscription   { "channel": "twilio-whatsapp", "enabled": true }
+###   2. POST {{host}}/api/v1/notifications/link           { "channel": "twilio-whatsapp" }            → code
+###   3. POST {{host}}/api/v1/notifications/link/redeem    { "code": "...", "address": "whatsapp:+15551234567" }
+### (steps 1–3 use your X-Debug-Subject dev-auth headers; see me-and-admin.http).

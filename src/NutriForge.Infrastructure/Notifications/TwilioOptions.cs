@@ -20,6 +20,16 @@ public sealed class TwilioOptions
     /// </summary>
     public string FromNumber { get; set; } = "whatsapp:+14155238886";
 
+    /// <summary>
+    /// The exact public URL Twilio is configured to call for the inbound webhook, used to verify the
+    /// <c>X-Twilio-Signature</c> (Twilio signs the URL byte-for-byte as registered in its console).
+    /// Set this when the API runs behind a proxy/load balancer, where the request the API receives
+    /// carries the internal host/scheme rather than the public one Twilio signed. When empty, the
+    /// signature is verified against the URL reconstructed from the request (honouring
+    /// <c>X-Forwarded-Proto</c>/<c>X-Forwarded-Host</c>).
+    /// </summary>
+    public string? InboundWebhookUrl { get; set; }
+
     /// <summary>True when the minimum credentials are set.</summary>
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(AccountSid) && !string.IsNullOrWhiteSpace(AuthToken);

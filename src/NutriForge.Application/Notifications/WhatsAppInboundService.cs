@@ -26,8 +26,13 @@ public sealed class WhatsAppInboundService(
     {
         var phone = StripWaPrefix(from);
 
-        // Resolve sender → ChannelSubscription
+        // Resolve sender → ChannelSubscription. IgnoreQueryFilters: this runs in the anonymous webhook
+        // (system) context that owns no user, so the per-user query filter (UserId == CurrentUserId,
+        // here Guid.Empty) would hide EVERY subscription and no sender could ever be matched — the same
+        // reason the notification workers ignore it. The lookup is keyed by the unique channel address,
+        // so it returns the one owning subscription; we then act explicitly on sub.UserId.
         var sub = await db.ChannelSubscriptions
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .FirstOrDefaultAsync(
                 s => s.Channel == "twilio-whatsapp" && s.Enabled &&

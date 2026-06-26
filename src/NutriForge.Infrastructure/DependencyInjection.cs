@@ -55,6 +55,14 @@ public static class DependencyInjection
         // Twilio WhatsApp channel (#96) — replaces the MockChannel when credentials are configured.
         AddNotificationChannel(services, builder.Configuration);
 
+        // Inbound WhatsApp webhook signature validation (#97 hardening). The endpoint is anonymous, so
+        // the X-Twilio-Signature is its only authentication. Registered UNCONDITIONALLY (independent of
+        // whether the outbound channel is enabled): the validator fails closed when no auth token is set,
+        // so a misconfigured/disabled channel rejects inbound traffic rather than trusting a spoofable sender.
+        var twilioOptions = builder.Configuration.GetSection(TwilioOptions.SectionName).Get<TwilioOptions>() ?? new TwilioOptions();
+        services.AddSingleton<Application.Notifications.IWhatsAppRequestValidator>(
+            new Notifications.TwilioRequestValidator(twilioOptions.AuthToken));
+
         // Connector registry (#14): the config-driven list of outbound connectors + a persisted
         // last-run store, surfaced read-only behind the admin endpoint. Descriptors are computed
         // from configuration once at startup so adding a connector is a one-line descriptor.
