@@ -199,25 +199,42 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.household }),
   });
 
+  function buildPlanBody(): CreateDietPlanRequest {
+    const body: CreateDietPlanRequest = { horizonDays: Number(days) || 7 };
+    // Always send the explicit set the form shows (even empty = just me). The pre-fill already
+    // reflects the saved household, so this respects "remove a row to cook for just yourself".
+    body.members = members
+      .filter((m) => m.name.trim().length > 0)
+      .map((m) => ({
+        name: m.name.trim(),
+        targetKcal: m.mode === "own" ? Number(m.kcal) || undefined : undefined,
+      }));
+    if (dietSlug) body.dietSlug = dietSlug;
+    if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
+    if (maxPrep.trim()) body.maxPrepMinutes = Number(maxPrep);
+    if (Number(blockSize) > 1) body.blockSize = Number(blockSize);
+    if (desire.trim()) body.desire = desire.trim();
+    return body;
+  }
+
   const create = useMutation({
-    mutationFn: () => {
-      const body: CreateDietPlanRequest = { horizonDays: Number(days) || 7 };
-      // Always send the explicit set the form shows (even empty = just me). The pre-fill already
-      // reflects the saved household, so this respects "remove a row to cook for just yourself".
-      body.members = members
-        .filter((m) => m.name.trim().length > 0)
-        .map((m) => ({
-          name: m.name.trim(),
-          targetKcal: m.mode === "own" ? Number(m.kcal) || undefined : undefined,
-        }));
-      if (dietSlug) body.dietSlug = dietSlug;
-      if (kcalTarget.trim()) body.kcalTarget = Number(kcalTarget);
-      if (maxPrep.trim()) body.maxPrepMinutes = Number(maxPrep);
-      if (Number(blockSize) > 1) body.blockSize = Number(blockSize);
-      if (desire.trim()) body.desire = desire.trim();
-      return dietPlansApi.create(body);
-    },
+    mutationFn: () => dietPlansApi.create(buildPlanBody()),
     onSuccess: (plan) => onCreated(plan.id),
+  });
+
+  // "Make me a full diet" (#101): the agent generates recipes to fill the pool, then plans.
+  const [autoNote, setAutoNote] = useState<string | null>(null);
+  const autoCreate = useMutation({
+    mutationFn: () => dietPlansApi.auto(buildPlanBody()),
+    onSuccess: (res) => {
+      setAutoNote(
+        res.recipesGenerated > 0
+          ? `Generated ${res.recipesGenerated} new recipe${res.recipesGenerated === 1 ? "" : "s"} for your plan.`
+          : "Used your existing recipes.",
+      );
+      queryClient.invalidateQueries({ queryKey: queryKeys.recipes });
+      onCreated(res.plan.id);
+    },
   });
 
   return (
@@ -461,15 +478,34 @@ function PlanForm({ onCreated }: { onCreated: (id: string) => void }) {
         </div>
 
         {create.isError ? <ErrorState error={create.error} /> : null}
+        {autoCreate.isError ? <ErrorState error={autoCreate.error} /> : null}
 
         <Button
           onClick={() => create.mutate()}
-          disabled={create.isPending}
+          disabled={create.isPending || autoCreate.isPending}
           className="w-full"
         >
           {create.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
           Generate plan
         </Button>
+
+        {/* The headline #101 action: let the agent author the recipes too. */}
+        <Button
+          variant="outline"
+          onClick={() => {
+            setAutoNote(null);
+            autoCreate.mutate();
+          }}
+          disabled={create.isPending || autoCreate.isPending}
+          className="w-full"
+        >
+          {autoCreate.isPending ? <Spinner /> : <ChefHat className="h-4 w-4" />}
+          Make me a full diet with AI
+        </Button>
+        <p className="text-xs text-slate-500">
+          No recipes to add yourself — the assistant writes the recipes and prep steps, then builds your
+          plan. {autoNote ? <span className="text-brand-400">{autoNote}</span> : null}
+        </p>
       </CardContent>
     </Card>
   );

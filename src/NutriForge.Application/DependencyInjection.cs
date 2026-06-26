@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<Planning.ShoppingListService>();
         services.AddScoped<DietGen.DietPlanGenerator>();
         services.AddScoped<DietGen.DietPlanService>();
+        services.AddScoped<DietGen.AutoDietService>();
         services.AddScoped<DietGen.HouseholdService>();
         services.AddScoped<DietGen.DietTemplateService>();
 

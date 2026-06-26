@@ -131,7 +131,7 @@ public static class RecipeEndpoints
                 req?.MealType, req?.DietSlug, req?.TargetKcal, req?.MaxPrepMinutes,
                 req?.Exclude, req?.Cuisine, Math.Clamp(req?.Servings ?? 4, 1, 12));
 
-            var created = await gen.GenerateAsync(user.CurrentUserId(), brief, count, ct);
+            var created = await gen.GenerateAsync(user.CurrentUserId(), brief, count, ct: ct);
             return Results.Ok(created);
         })
             .RequireRateLimiting(RateLimitPolicies.Expensive)

@@ -22,7 +22,8 @@ public sealed class RecipeGenerationService(RecipeService recipes, IRecipeGenAge
     /// them (with computed nutrition). Returns the created recipes; empty when no AI provider is configured.
     /// </summary>
     public async Task<IReadOnlyList<RecipeDto>> GenerateAsync(
-        Guid ownerUserId, RecipeBrief brief, int count, CancellationToken ct = default)
+        Guid ownerUserId, RecipeBrief brief, int count,
+        IReadOnlyList<string>? extraTags = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brief);
         if (!agent.IsConfigured)
@@ -35,12 +36,18 @@ public sealed class RecipeGenerationService(RecipeService recipes, IRecipeGenAge
 
         foreach (var d in drafts)
         {
+            // extraTags force diet/meal tags the planner filters on (e.g. "high-protein"), so an
+            // auto-generated recipe is guaranteed to qualify for the diet it was generated for (#101).
+            var tags = extraTags is { Count: > 0 }
+                ? d.Tags.Concat(extraTags).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+                : d.Tags;
+
             var req = new CreateRecipeRequest(
                 Name: d.Name,
                 Servings: d.Servings is > 0 ? d.Servings.Value : brief.Servings,
                 TotalMinutes: d.TotalMinutes ?? 0,
                 Instructions: d.Instructions,
-                Tags: d.Tags,
+                Tags: tags,
                 Ingredients: [.. d.Ingredients.Select(i => new RecipeIngredientInput(i.Quantity ?? 0, i.Unit, i.Name, i.RawText))],
                 SourceType: "ai-generated");
 

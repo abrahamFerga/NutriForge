@@ -455,6 +455,16 @@ export const dietPlansApi = {
   create(body: CreateDietPlanRequest): Promise<DietPlanDto> {
     return request<DietPlanDto>("/api/v1/diet-plans", { method: "POST", body });
   },
+  /**
+   * "Make me a full diet" (#101): generates recipes to fill the pool when it's thin, then plans.
+   * Returns the plan plus how many recipes were generated. Throws {@link ApiError} 503 with no AI.
+   */
+  auto(body: CreateDietPlanRequest): Promise<{ plan: DietPlanDto; recipesGenerated: number }> {
+    return request<{ plan: DietPlanDto; recipesGenerated: number }>("/api/v1/diet-plans/auto", {
+      method: "POST",
+      body,
+    });
+  },
   get(id: string, signal?: AbortSignal): Promise<DietPlanDto> {
     return request<DietPlanDto>(
       `/api/v1/diet-plans/${encodeURIComponent(id)}`,
