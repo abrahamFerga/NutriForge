@@ -26,7 +26,7 @@ import {
   LoadingState,
 } from "@/components/StateMessage";
 import { useDiary, useTargets, useTrend } from "@/hooks/useQueries";
-import { round, today } from "@/lib/utils";
+import { cn, round, today } from "@/lib/utils";
 
 export function Dashboard() {
   const date = today();
@@ -73,6 +73,19 @@ export function Dashboard() {
 
   const ringData = [{ name: "kcal", value: ringPct, fill: "var(--color-brand-500)" }];
 
+  // Weekly consistency (#103 retention loop): which of the last 7 days had any food logged,
+  // oldest→newest, plus the current streak (consecutive logged days ending today). Derived from
+  // the trend the dashboard already loads — no extra request.
+  const loggedByDay = [...(trend.data ?? [])]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((p) => p.kcal > 0);
+  const loggedDays = loggedByDay.filter(Boolean).length;
+  let streak = 0;
+  for (let i = loggedByDay.length - 1; i >= 0; i--) {
+    if (loggedByDay[i]) streak += 1;
+    else break;
+  }
+
   return (
     <div className="space-y-6">
       <PageHeading
@@ -97,6 +110,10 @@ export function Dashboard() {
           </span>
           <span className="font-medium text-brand-400">Log food →</span>
         </Link>
+      ) : null}
+
+      {loggedDays >= 1 ? (
+        <WeekConsistency logged={loggedByDay} loggedDays={loggedDays} streak={streak} />
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -200,6 +217,51 @@ export function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-2">
         <WeightCard />
         <HydrationCard />
+      </div>
+    </div>
+  );
+}
+
+/** A slim weekly-consistency strip — the logging streak + a 7-day dot row. A gentle, judgment-free
+ *  retention nudge (#103): "showing up" is what's celebrated, not perfection. */
+function WeekConsistency({
+  logged,
+  loggedDays,
+  streak,
+}: {
+  logged: boolean[];
+  loggedDays: number;
+  streak: number;
+}) {
+  return (
+    <div className="nf-card flex items-center justify-between gap-3 px-4 py-3">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400/20 to-orange-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/25">
+          <Flame className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="leading-tight">
+          <p className="text-sm font-semibold text-slate-100">
+            {streak > 1
+              ? `${streak}-day streak`
+              : streak === 1
+                ? "Logged today — nice"
+                : "Keep it going"}
+          </p>
+          <p className="text-xs text-slate-400">
+            {loggedDays} of the last 7 days logged
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5" aria-hidden="true">
+        {logged.map((on, i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-2.5 w-2.5 rounded-full transition-colors",
+              on ? "bg-brand-400" : "bg-slate-700/70",
+            )}
+          />
+        ))}
       </div>
     </div>
   );

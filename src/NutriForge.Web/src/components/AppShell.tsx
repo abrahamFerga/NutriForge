@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import {
   BookOpen,
   CalendarRange,
@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessageCircle,
+  Plus,
   User,
   Utensils,
 } from "lucide-react";
@@ -131,14 +132,25 @@ export function AppShell() {
         ))}
       </nav>
 
-      {/* Floating assistant button — present on every route. Sits above the bottom tab bar on mobile. */}
-      <button
-        onClick={() => setAssistantOpen(true)}
-        aria-label="Open NutritionAssistant"
-        className="group fixed right-5 bottom-20 z-40 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-teal-500 text-slate-950 shadow-xl shadow-brand-500/40 ring-1 ring-white/10 transition-all hover:-translate-y-0.5 hover:shadow-brand-500/60 md:bottom-5"
-      >
-        <MessageCircle className="h-6 w-6 transition-transform group-hover:scale-110" />
-      </button>
+      {/* Floating action stack — present on every route, above the mobile tab bar.
+          Primary = log food (the #1 action, most thumb-reachable at the bottom);
+          secondary = the always-present NutritionAssistant, stacked just above. */}
+      <div className="fixed right-5 bottom-20 z-40 flex flex-col items-center gap-3 md:right-6 md:bottom-6">
+        <button
+          onClick={() => setAssistantOpen(true)}
+          aria-label="Open NutritionAssistant"
+          className="group flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-700/70 bg-slate-900/80 text-brand-300 shadow-lg ring-1 ring-white/5 backdrop-blur transition-all hover:-translate-y-0.5 hover:text-brand-200 hover:shadow-brand-500/20"
+        >
+          <MessageCircle className="h-5 w-5 transition-transform group-hover:scale-110" />
+        </button>
+        <Link
+          to="/diary"
+          aria-label="Log food"
+          className="group flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-teal-500 text-slate-950 shadow-xl shadow-brand-500/40 ring-1 ring-white/10 transition-all hover:-translate-y-0.5 hover:shadow-brand-500/60"
+        >
+          <Plus className="h-6 w-6 transition-transform group-hover:scale-110" />
+        </Link>
+      </div>
 
       <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
     </div>
