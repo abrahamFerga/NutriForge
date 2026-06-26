@@ -88,6 +88,15 @@ if (!underTest)
        .WithEnvironment("Channels__WhatsApp__Twilio__AccountSid", twilioSid)
        .WithEnvironment("Channels__WhatsApp__Twilio__AuthToken", twilioToken);
 }
+else
+{
+    // Integration tests exercise the inbound webhook's X-Twilio-Signature gate (#97 hardening). Give
+    // the API a deterministic auth token + a fixed public webhook URL so a test can compute a valid
+    // signature regardless of the dynamic Aspire port. Provider/AccountSid are left unset, so the
+    // OUTBOUND channel still falls back to the MockChannel — only the inbound validator is armed.
+    api.WithEnvironment("Channels__WhatsApp__Twilio__AuthToken", "itest-twilio-token")
+       .WithEnvironment("Channels__WhatsApp__Twilio__InboundWebhookUrl", "https://nutriforge.test/api/v1/channels/whatsapp/inbound");
+}
 
 // SPA — Vite + React dev server. The API origin is injected so the browser talks to the right
 // backend. Skipped under integration tests (SKIP_NPM_APPS=true) so they don't boot the Node dev
