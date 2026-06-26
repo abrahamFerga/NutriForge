@@ -382,6 +382,12 @@ export const recipesApi = {
       method: "DELETE",
     });
   },
+  /** Bulk-remove the caller's AI-generated recipes (#101). Returns how many were removed. */
+  clearAi(): Promise<{ removed: number }> {
+    return request<{ removed: number }>("/api/v1/recipes/ai-generated", {
+      method: "DELETE",
+    });
+  },
   /** Admin-only: promote a recipe to the shared global catalog. Throws 403 (not admin) / 409 (clash). */
   promoteGlobal(id: string): Promise<RecipeDto> {
     return request<RecipeDto>(

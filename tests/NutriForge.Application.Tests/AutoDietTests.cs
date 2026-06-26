@@ -146,6 +146,31 @@ public sealed class AutoDietTests
     }
 
     [Fact]
+    public async Task Clear_ai_generated_removes_only_the_users_ai_catalog_recipes()
+    {
+        var userId = Guid.NewGuid();
+        await using var db = TestDb.New(userId);
+        var recipes = new RecipeService(db, new FakeCurrentUser(userId));
+
+        async Task Add(string name, string? source) =>
+            await recipes.CreateAsync(new CreateRecipeRequest(
+                name, 1, 10, "Cook.", ["t"],
+                [new RecipeIngredientInput(100, "g", "chicken breast")], SourceType: source), ownerUserId: userId);
+
+        await Add("AI catalog one", RecipeGenerationService.CatalogSource);   // removed
+        await Add("Plan one", RecipeGenerationService.PlanGeneratedSource);   // kept (tied to a plan)
+        await Add("Manual one", null);                                        // kept (user-authored)
+
+        var removed = await recipes.ClearAiGeneratedAsync(userId);
+
+        Assert.Equal(1, removed);
+        var remaining = await db.Recipes.IgnoreQueryFilters().Select(r => r.Name).ToListAsync(CancellationToken.None);
+        Assert.DoesNotContain("AI catalog one", remaining);
+        Assert.Contains("Plan one", remaining);
+        Assert.Contains("Manual one", remaining);
+    }
+
+    [Fact]
     public async Task Without_an_ai_provider_it_plans_from_the_catalog()
     {
         var userId = Guid.NewGuid();

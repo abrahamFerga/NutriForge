@@ -106,9 +106,32 @@ export function Recipes() {
   });
   const noAi = generate.error instanceof ApiError && generate.error.status === 503;
 
+  // One-tap declutter: remove the AI recipes the user never wanted to curate (#101).
+  const clearAi = useMutation({
+    mutationFn: () => recipesApi.clearAi(),
+    onSuccess: (res) => {
+      setGenNote(
+        res.removed > 0
+          ? `Removed ${res.removed} AI recipe${res.removed === 1 ? "" : "s"} from your list.`
+          : "No AI recipes to remove.",
+      );
+      void qc.invalidateQueries({ queryKey: queryKeys.recipes });
+    },
+  });
+
   function runGenerate() {
     setGenNote(null);
     generate.mutate();
+  }
+  function runClearAi() {
+    if (
+      window.confirm(
+        "Remove all your AI-generated recipes from the list? Plans you've already made keep their meals.",
+      )
+    ) {
+      setGenNote(null);
+      clearAi.mutate();
+    }
   }
   function startManual() {
     setShowForm(true);
@@ -163,6 +186,16 @@ export function Recipes() {
       ) : generate.isError ? (
         <ErrorState error={generate.error} />
       ) : null}
+
+      <button
+        type="button"
+        onClick={runClearAi}
+        disabled={clearAi.isPending}
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-300 disabled:opacity-50"
+      >
+        {clearAi.isPending ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />}
+        Clear AI recipes
+      </button>
 
       {showImport && !importDraft ? (
         <ImportPanel

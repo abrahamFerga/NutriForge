@@ -75,6 +75,11 @@ public static class RecipeEndpoints
             };
         }).WithName("DeleteRecipe");
 
+        // Bulk-clear the caller's AI-generated recipes (#101) — declutter a catalog they never wanted.
+        group.MapDelete("/ai-generated", async (RecipeService recipes, ICurrentUser user, CancellationToken ct) =>
+            Results.Ok(new { removed = await recipes.ClearAiGeneratedAsync(user.CurrentUserId(), ct) }))
+            .WithName("ClearAiRecipes");
+
         // Promote a recipe to the shared GLOBAL catalog. Admin-only — layered on top of the group's
         // OwnerOnly so BOTH must pass.
         group.MapPost("/{id:guid}/promote-global", async (Guid id, RecipeService recipes, CancellationToken ct) =>

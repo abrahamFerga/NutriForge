@@ -127,6 +127,28 @@ public sealed class RecipeService(ICatalogDbContext db, ICurrentUser currentUser
     }
 
     /// <summary>
+    /// Bulk-remove the caller's AI-generated catalog recipes (#101) — a one-tap way to clear a recipe list
+    /// the user never wanted to curate. Only their OWN "Generate with AI" recipes are removed; global
+    /// (admin-curated) recipes and the hidden per-plan recipes are left intact. Returns how many were removed.
+    /// </summary>
+    public async Task<int> ClearAiGeneratedAsync(Guid ownerUserId, CancellationToken ct = default)
+    {
+        var toRemove = await db.Recipes.Include(r => r.Ingredients)
+            .Where(r => r.OwnerUserId == ownerUserId && r.SourceType == RecipeGenerationService.CatalogSource)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (toRemove.Count == 0)
+        {
+            return 0;
+        }
+
+        // Remove the owned ingredient rows explicitly (client-set keys), then the recipes.
+        db.RecipeIngredients.RemoveRange(toRemove.SelectMany(r => r.Ingredients));
+        db.Recipes.RemoveRange(toRemove);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return toRemove.Count;
+    }
+
+    /// <summary>
     /// Promote a recipe to GLOBAL (admin action — the endpoint enforces the role). Only operates on a
     /// recipe the admin can already see (their own or an existing global); promoting an already-global
     /// recipe is a no-op. Refuses (<see cref="RecipeWriteStatus.Conflict"/>) if a different global recipe
