@@ -123,7 +123,14 @@ public sealed class DietPlanService(
             : await catalog.DietTypes.AsNoTracking().FirstOrDefaultAsync(d => d.Slug == intent.DietSlug, ct).ConfigureAwait(false);
 
         var pool = RecipeFilter.Filter(recipes, intent, diet);
-        var result = await generator.GenerateAsync(pool, intent, plan.TargetKcal, ct).ConfigureAwait(false);
+
+        // Auto-diet (onlyRecipeIds set) builds from recipes we JUST generated — already meal-typed, varied and
+        // on-cuisine — so the deterministic greedy SELECT is optimal: skip the advisory LLM meal-select (a
+        // whole model round-trip of latency, and the only path that could mis-place a meal type). The
+        // catalog/manual path keeps the agent to optimize soft objectives over a large, mixed pool.
+        var result = onlyRecipeIds is not null
+            ? generator.Generate(pool, intent, plan.TargetKcal)
+            : await generator.GenerateAsync(pool, intent, plan.TargetKcal, ct).ConfigureAwait(false);
 
         plan.ClearSlots();
         foreach (var s in result.Slots)
