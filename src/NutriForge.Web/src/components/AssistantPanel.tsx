@@ -22,6 +22,13 @@ interface ChatMessage {
 const NOT_CONFIGURED_MESSAGE =
   "The assistant isn't configured yet — set the `Ai` provider + API key to enable it.";
 
+/** One-tap starter questions for the empty state — span the assistant's range (lookup + AI logging). */
+const SUGGESTIONS = [
+  "How many calories do I have left today?",
+  "What's my protein target?",
+  "Log 2 large eggs for breakfast",
+];
+
 /**
  * Always-present "NutritionAssistant" chatbot drawer — a live Microsoft Agent Framework
  * agent whose tools route through the same API the rest of the app uses, so every number
@@ -39,7 +46,15 @@ export function AssistantPanel({ open, onClose }: AssistantPanelProps) {
   const [logging, setLogging] = useState(false);
   const [logResult, setLogResult] = useState<{ ok: boolean; message: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
+
+  // Tapping a starter question drops it into the composer (focused) so the user can send it or tweak it
+  // first — a lower-friction way in than typing from a blank box.
+  const pickSuggestion = (s: string) => {
+    setInput(s);
+    inputRef.current?.focus();
+  };
 
   useEffect(() => {
     if (open && configured === null) {
@@ -205,12 +220,21 @@ export function AssistantPanel({ open, onClose }: AssistantPanelProps) {
               <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-400">
                 <Sparkles className="h-7 w-7" />
               </span>
-              <div className="space-y-1">
+              <div className="space-y-3">
                 <p className="text-base font-semibold text-slate-100">Ask about your nutrition</p>
-                <p className="max-w-xs text-sm text-slate-400">
-                  Try "How many calories do I have left today?", "What's my protein target?", or
-                  "Log 2 large eggs for breakfast."
-                </p>
+                <p className="max-w-xs text-sm text-slate-400">Tap a question to start, or type your own.</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => pickSuggestion(s)}
+                      className="rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300 transition-colors hover:border-brand-500/50 hover:bg-brand-500/10 hover:text-brand-200"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
                 {configured === false && (
                   <p className="mt-2 max-w-xs text-xs text-amber-400">
                     The assistant isn't configured yet — set the <code>Ai</code> provider + key to enable live chat.
@@ -278,6 +302,7 @@ export function AssistantPanel({ open, onClose }: AssistantPanelProps) {
             }}
           >
             <Input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Message the assistant…"
