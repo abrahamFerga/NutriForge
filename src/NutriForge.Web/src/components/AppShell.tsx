@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import {
   BookOpen,
@@ -15,6 +15,8 @@ import { AssistantPanel } from "@/components/AssistantPanel";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Spinner } from "@/components/ui/spinner";
+import { LoadingState } from "@/components/StateMessage";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useProfile } from "@/hooks/useQueries";
 import { authEnabled, logout } from "@/lib/auth";
 import { isOnboardingDismissed } from "@/lib/onboarding";
@@ -105,9 +107,14 @@ export function AppShell() {
           id="main-content"
           className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-28 sm:px-6 md:pb-8 lg:px-8"
         >
-          {/* Key on the path so each route gets a subtle entrance animation. */}
+          {/* Key on the path so each route gets a subtle entrance animation. The Suspense boundary keeps
+              the nav + top bar in place while a lazily-loaded page chunk downloads. */}
           <div key={location.pathname} className="nf-animate-in">
-            <Outlet />
+            <RouteErrorBoundary>
+              <Suspense fallback={<LoadingState label="Loading…" />}>
+                <Outlet />
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         </main>
       </div>
