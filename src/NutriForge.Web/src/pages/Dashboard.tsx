@@ -37,8 +37,10 @@ export function Dashboard() {
   if (targets.isLoading || diary.isLoading) {
     return <LoadingState label="Loading your dashboard…" />;
   }
-  if (targets.isError) return <ErrorState error={targets.error} />;
-  if (diary.isError) return <ErrorState error={diary.error} />;
+  if (targets.isError)
+    return <ErrorState error={targets.error} onRetry={() => targets.refetch()} />;
+  if (diary.isError)
+    return <ErrorState error={diary.error} onRetry={() => diary.refetch()} />;
 
   const target = targets.data;
   const consumed = diary.data?.consumed ?? {
@@ -197,7 +199,7 @@ export function Dashboard() {
           {trend.isLoading ? (
             <LoadingState label="Loading trend…" />
           ) : trend.isError ? (
-            <ErrorState error={trend.error} />
+            <ErrorState error={trend.error} onRetry={() => trend.refetch()} />
           ) : !trend.data || trend.data.length === 0 ? (
             <EmptyState title="No history yet">
               <p>Log foods over the coming days to see your trend.</p>

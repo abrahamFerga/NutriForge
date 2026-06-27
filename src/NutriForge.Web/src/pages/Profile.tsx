@@ -130,7 +130,8 @@ export function Profile() {
   }
 
   if (profileQuery.isLoading) return <LoadingState label="Loading profile…" />;
-  if (profileQuery.isError) return <ErrorState error={profileQuery.error} />;
+  if (profileQuery.isError)
+    return <ErrorState error={profileQuery.error} onRetry={() => profileQuery.refetch()} />;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
