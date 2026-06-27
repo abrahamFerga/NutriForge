@@ -24,14 +24,15 @@ export function ThemeToggle() {
           aria-label={label}
           onClick={() => setTheme(value)}
           className={[
-            'flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+            'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors sm:px-2.5 sm:py-1',
             theme === value
               ? 'bg-brand-500 text-white shadow-sm'
               : 'text-slate-400 hover:text-slate-200',
           ].join(' ')}
         >
           <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-          {label}
+          {/* Labels would overflow the mobile top bar — icon-only on phones (the aria-label keeps it accessible). */}
+          <span className="hidden sm:inline">{label}</span>
         </button>
       ))}
     </div>
