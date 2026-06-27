@@ -67,30 +67,33 @@ public sealed class AutoDietService(
         var perType = Math.Clamp((horizon + 1) / 2, MinPerMealType, MaxPerMealType);
         var total = Math.Min(MaxGenerate, perType * mealTypes.Length);
         var perServingKcal = kcal / mealsPerDay;
-        var ids = new List<Guid>(total);
+
+        // One batch per meal type, sized up front so the global cap is honored deterministically. Each batch
+        // forces a canonical meal-type tag (alongside the diet slug) onto its recipes — without it meal type
+        // is only soft prompt guidance and the planner, which can't tell a breakfast recipe from a dinner
+        // one, drops dinner dishes into breakfast slots (#101). The batches generate concurrently.
+        var batches = new List<RecipeBatchRequest>(mealTypes.Length);
+        var remaining = total;
         foreach (var mealType in mealTypes)
         {
-            if (ids.Count >= total)
+            if (remaining <= 0)
             {
                 break;
             }
 
-            // Force a canonical meal-type tag (alongside the diet slug) onto every recipe in this batch.
-            // Without it, meal type is only soft prompt guidance and the planner — which can't tell a
-            // breakfast recipe from a dinner one — drops dinner dishes into breakfast slots (#101).
+            var batch = Math.Min(perType, remaining);
+            remaining -= batch;
             IReadOnlyList<string> forceTags = string.IsNullOrWhiteSpace(req.DietSlug)
                 ? [mealType]
                 : [req.DietSlug, mealType];
-
-            var batch = Math.Min(perType, total - ids.Count);
             var brief = new RecipeBrief(mealType, req.DietSlug, perServingKcal, req.MaxPrepMinutes, exclude, req.Desire, Servings: 4);
-            var created = await recipeGen
-                .GenerateAsync(userId, brief, batch, forceTags, RecipeGenerationService.PlanGeneratedSource, ct)
-                .ConfigureAwait(false);
-            ids.AddRange(created.Select(r => r.Id));
+            batches.Add(new RecipeBatchRequest(brief, batch, forceTags));
         }
 
-        return ids;
+        var created = await recipeGen
+            .GenerateBatchesAsync(userId, batches, RecipeGenerationService.PlanGeneratedSource, ct)
+            .ConfigureAwait(false);
+        return created.Select(r => r.Id).ToList();
     }
 
     private static string[] MealTypesFor(int mealsPerDay)
