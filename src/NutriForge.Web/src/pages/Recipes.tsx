@@ -337,7 +337,7 @@ function RecipeList({
       {recipes.isLoading ? (
         <LoadingState label="Loading recipes…" />
       ) : recipes.isError ? (
-        <ErrorState error={recipes.error} />
+        <ErrorState error={recipes.error} onRetry={() => recipes.refetch()} />
       ) : !recipes.data || recipes.data.length === 0 ? (
         searching ? (
           <EmptyState title={`No recipes match “${debounced.trim()}”`}>
@@ -504,7 +504,7 @@ function RecipeDetail({ id, onBack }: { id: string; onBack: () => void }) {
       {recipe.isLoading ? (
         <LoadingState label="Loading recipe…" />
       ) : recipe.isError ? (
-        <ErrorState error={recipe.error} />
+        <ErrorState error={recipe.error} onRetry={() => recipe.refetch()} />
       ) : data ? (
         <>
           <div className="flex flex-wrap items-start justify-between gap-3">

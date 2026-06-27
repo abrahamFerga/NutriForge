@@ -642,7 +642,7 @@ function PlanResult({ planId }: { planId: string }) {
     return (
       <Card>
         <CardContent className="py-8">
-          <ErrorState error={plan.error} />
+          <ErrorState error={plan.error} onRetry={() => plan.refetch()} />
         </CardContent>
       </Card>
     );
