@@ -69,10 +69,18 @@ export function AssistantPanel({ open, onClose }: AssistantPanelProps) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, sending, proposal, logResult]);
 
-  // WAI-ARIA dialog behaviour: move focus into the dialog when it opens (once per open) so keyboard and
-  // screen-reader users land inside it.
+  // WAI-ARIA dialog focus management: when the dialog opens, remember what had focus (the trigger button)
+  // and move focus into the dialog; when it closes, hand focus back to the trigger so keyboard users
+  // aren't dropped at the top of the page.
+  const triggerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (open) inputRef.current?.focus();
+    if (open) {
+      triggerRef.current = document.activeElement as HTMLElement | null;
+      inputRef.current?.focus();
+    } else {
+      triggerRef.current?.focus();
+      triggerRef.current = null;
+    }
   }, [open]);
 
   // …and close it on Escape, the expected way out of any modal.
