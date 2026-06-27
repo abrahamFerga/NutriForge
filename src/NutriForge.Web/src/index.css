@@ -141,7 +141,15 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nf-animate-in { animation: none; }
-  .nf-hover { transition: none; }
-  .nf-hover:hover { transform: none; }
+  /* Honor the OS "reduce motion" setting across the WHOLE app — not just our two custom classes, but every
+     Tailwind transition/transform too: button & card hover lifts, the assistant slide-in, the route
+     entrance, colour fades. The standard global reduce-motion reset. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
